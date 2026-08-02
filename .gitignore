@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Gradle distributions (downloaded)
+gradle-8.5/
+gradle-8.5-bin.zip
+gradle-8.9-bin.zip
+
+# Kotlin
+.kotlin/
+
+# Local machine config
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# Internal planning/tracking
+.pi/
+
+# OS
+.DS_Store
+
+# Android signing
+*.jks
+*.keystore
+keystore.properties

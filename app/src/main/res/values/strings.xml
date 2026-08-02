@@ -1,0 +1,147 @@
+<resources>
+    <string name="app_name">WireFinder</string>
+    <string name="app_name_short">WireFinder</string>
+
+    <!-- Main Screen -->
+    <string name="title_known_networks">Known Networks</string>
+    <string name="title_detected_networks">Detected Networks</string>
+    <string name="empty_no_csv">No CSV file loaded</string>
+    <string name="empty_no_csv_desc">Tap the button below to select a CSV file containing known networks</string>
+    <string name="empty_no_detected">No known networks detected</string>
+    <string name="empty_no_detected_desc">Pull down to scan, or select a different CSV file</string>
+    <string name="btn_select_csv">Select CSV File</string>
+    <string name="btn_refresh">Refresh</string>
+    <string name="loading_networks">Loading networks…</string>
+    <string name="error_load_failed">Failed to load networks</string>
+    <string name="error_wrong_password">Incorrect password</string>
+    <string name="error_csv_format">Invalid CSV format</string>
+    <string name="network_ssid">SSID: %s</string>
+    <string name="network_mac">MAC: %s</string>
+    <string name="network_last_seen">Last seen: %s</string>
+    <string name="network_signal">Signal: %d dBm</string>
+    <string name="network_never_seen">Never detected</string>
+    <string name="network_detected">DETECTED</string>
+    <string name="scanning_active">Scanning active</string>
+    <string name="scanning_inactive">Scanning inactive</string>
+
+    <!-- Settings -->
+    <string name="title_settings">Settings</string>
+    <string name="pref_category_csv">CSV Configuration</string>
+    <string name="pref_category_scanning">Scanning</string>
+    <string name="pref_category_privacy">Privacy</string>
+    <string name="pref_flag_secure">Hide screens from capture</string>
+    <string name="pref_flag_secure_summary">Block screenshots, screen recording, and recents previews when passwords or QR codes are shown</string>
+    <string name="csv_too_large">CSV file too large (max 5 MB)</string>
+    <string name="pref_category_data">Data Management</string>
+    <string name="pref_current_csv">Current CSV: %s</string>
+    <string name="pref_change_csv">Change CSV File</string>
+    <string name="pref_encryption_summary">Stored CSV files are encrypted with AES-256 using a key locked behind your fingerprint or device login.</string>
+    <string name="pref_scan_interval">Scan Interval (minutes)</string>
+    <string name="pref_scan_interval_summary">How often to scan for networks in background</string>
+    <string name="pref_enable_scanning">Enable Background Scanning</string>
+    <string name="pref_enable_scanning_summary">Automatically scan for known networks periodically</string>
+    <string name="pref_clear_data">Clear All Data</string>
+    <string name="pref_clear_data_summary">Remove CSV, networks, and reset settings</string>
+    <string name="dialog_password_title">Enter Encryption Password</string>
+    <string name="dialog_password_hint">Password to decrypt CSV</string>
+    <string name="btn_ok">OK</string>
+    <string name="btn_cancel">Cancel</string>
+    <string name="btn_save">Save</string>
+    <string name="btn_settings">Settings</string>
+    <string name="btn_enable_location">Enable Location</string>
+    <string name="btn_later">Later</string>
+    <string name="toast_csv_loaded">CSV loaded: %d networks</string>
+    <string name="toast_csv_cleared">CSV data cleared</string>
+    <string name="toast_csv_encrypted">CSV encrypted and protected</string>
+    <string name="toast_settings_saved">Settings saved</string>
+    <string name="toast_error">Error: %s</string>
+
+    <!-- Biometric encryption -->
+    <string name="biometric_decrypt_title">Unlock networks</string>
+    <string name="biometric_decrypt_subtitle">Authenticate to decrypt your known networks CSV file</string>
+    <string name="biometric_encrypt_title">Protect networks</string>
+    <string name="biometric_encrypt_subtitle">Authenticate to encrypt the stored CSV file</string>
+    <string name="biometric_cancelled">Authentication cancelled</string>
+    <string name="biometric_failed_title">Authentication Failed</string>
+    <string name="encrypt_key_invalidated">The encryption key was invalidated because your device security settings changed (new fingerprint, PIN, or lock screen). Please re-import the CSV file to re-encrypt it.</string>
+    <string name="plaintext_warning_title">CSV copy is not encrypted</string>
+    <string name="plaintext_warning_message">The stored CSV copy still contains plaintext Wi-Fi passwords. Encrypt it, or delete the stored copy (network data already loaded stays in the app).</string>
+    <string name="btn_encrypt_again">Encrypt now</string>
+    <string name="btn_delete_file">Delete stored copy</string>
+    <string name="btn_keep_plaintext">Keep plaintext</string>
+
+    <!-- Permissions -->
+    <string name="dialog_permission_required_title">Permissions Required</string>
+    <string name="dialog_permission_required_message">The following permissions are required for Wi-Fi scanning and notifications: %s\n\nPlease grant them in app settings.</string>
+    <string name="dialog_location_required_title">Location Services Off</string>
+    <string name="dialog_location_required_message">Wi-Fi scanning requires location services to be enabled on this device (Android 10 and newer). Turn them on to allow WireFinder to detect networks.</string>
+
+    <!-- Error / Crash log -->
+    <string name="btn_copy">Copy</string>
+    <string name="btn_close">Close</string>
+    <string name="toast_copied">Copied to clipboard</string>
+    <string name="error_details_title">Error Details</string>
+    <string name="csv_load_issues_title">CSV Loaded with Issues</string>
+    <string name="app_error_title">App Error</string>
+    <string name="log_select_hint">Press and hold to select text</string>
+
+    <!-- Manual Scan -->
+    <string name="scan_manual_title">Manual Scan</string>
+    <string name="scan_result_title">Known Networks Detected</string>
+    <string name="scan_result_found">Known networks detected nearby:</string>
+    <string name="scan_result_none">No known networks detected</string>
+    <string name="scan_error_no_wifi_service">Wi-Fi service is unavailable on this device. If Wi-Fi is disabled in Quick Settings, enable it and try again.</string>
+    <string name="scan_error_wifi_off">Wi-Fi is turned off. Enable Wi-Fi (location services must also be on for Android 13 and newer) and pull down again to rescan.</string>
+    <string name="scan_error_permission">Missing permission: %1$s. Grant it in Settings &gt; Apps &gt; WireFinder &gt; Permissions, then pull down to rescan.</string>
+    <string name="scan_error_failed">The system refused to start a Wi-Fi scan.</string>
+    <string name="scan_error_throttled">Android throttles Wi-Fi scans to a few per 2 minutes (other apps and the background service count toward the limit). Wait about 30 seconds and try again.</string>
+    <string name="scan_error_location_off">No scan results arrived within 10 seconds. Location services are currently off, which blocks Wi-Fi scan results on Android 13 and newer. Enable them in Settings &gt; Location and rescan.</string>
+    <string name="scan_note_cached">New scan refused by the system; showing cached results instead.</string>
+    <string name="scan_note_stale">No new scan results arrived within 10 seconds; showing cached results.</string>
+    <string name="scan_match_format">%1$s (%2$s) at %3$d dBm</string>
+    <string name="scan_detected_count">Detected %1$d known network(s) — shown in the list</string>
+
+    <!-- Connect to network -->
+    <string name="connect_progress_title">Connecting</string>
+    <string name="connect_progress_message">Connecting to %1$s…\n\nAccept the system prompt to complete the connection.</string>
+    <string name="connect_success">Connected to %1$s</string>
+    <string name="connect_failed_title">Connection Failed</string>
+    <string name="connect_failed_message">Could not connect to %1$s</string>
+    <string name="connect_disconnected">%1$s disconnected</string>
+    <string name="connect_error_unavailable">The access point was not reachable, the password may be wrong, or the system prompt was dismissed.</string>
+    <string name="connect_error_timeout">Connection attempt timed out after 60 seconds.</string>
+
+    <!-- QR sharing -->
+    <string name="btn_share_network">Share network</string>
+    <string name="btn_share">Share</string>
+    <string name="qr_dialog_title">Share Network</string>
+    <string name="qr_dialog_subtitle">Scan with any camera or Wi-Fi scanner to join this network.</string>
+    <string name="qr_hint">Format: WIFI:T:WPA;S:SSID;P:PASSWORD;;</string>
+    <string name="qr_open_network">Open network (no password)</string>
+    <string name="qr_password_label">Password: %1$s</string>
+
+    <!-- Foreground Service -->
+    <string name="foreground_service_channel_name">Wi-Fi Scanning</string>
+    <string name="foreground_service_channel_desc">Background service for periodic Wi-Fi network scanning</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">Network Alerts</string>
+    <string name="notification_channel_desc">Notifications when known networks are detected nearby</string>
+    <string name="notification_title">Known Network Nearby</string>
+    <string name="notification_text">%1$s (%2$s) detected at %3$d dBm</string>
+    <string name="notification_public_title">Known Network Nearby</string>
+    <string name="notification_public_text">A known Wi-Fi network is nearby</string>
+    <string name="notification_action_connect">Connect</string>
+    <string name="notification_action_dismiss">Dismiss</string>
+
+    <!-- Match type badges -->
+    <string name="match_badge_ssid">SSID</string>
+    <string name="match_badge_mac">MAC</string>
+    <string name="match_badge_ssid_desc">Matched by SSID only — a rogue access point with the same name could trigger this</string>
+    <string name="match_badge_mac_desc">Matched by MAC address</string>
+    <string name="match_badge_both_desc">Matched by SSID and MAC address</string>
+
+    <!-- CSV Format Help -->
+    <string name="csv_format_help">CSV Format: MAC,SSID,PASSWORD (one per line, SSID matching is case-insensitive)</string>
+    <string name="csv_example">Example:\n00:11:22:33:44:55,MyNetwork,password123\naa:bb:cc:dd:ee:ff,AnotherAP,secret456</string>
+</resources>

@@ -1,0 +1,48 @@
+<resources>
+    <!-- Base application theme - dark with OLED black surfaces, Material You on Android 12+ -->
+    <style name="Theme.WireFinder" parent="Theme.Material3.Dark.NoActionBar">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryContainer">@color/primary_container</item>
+        <item name="colorOnPrimary">@color/on_primary</item>
+        <item name="colorOnPrimaryContainer">@color/on_primary_container</item>
+        <item name="colorSecondary">@color/secondary</item>
+        <item name="colorSecondaryContainer">@color/secondary_container</item>
+        <item name="colorOnSecondary">@color/on_secondary</item>
+        <item name="colorOnSecondaryContainer">@color/on_secondary_container</item>
+        <item name="colorTertiary">@color/tertiary</item>
+        <item name="colorTertiaryContainer">@color/tertiary_container</item>
+        <item name="colorOnTertiary">@color/on_tertiary</item>
+        <item name="colorOnTertiaryContainer">@color/on_tertiary_container</item>
+        <item name="colorError">@color/error</item>
+        <item name="colorErrorContainer">@color/error_container</item>
+        <item name="colorOnError">@color/on_error</item>
+        <item name="colorOnErrorContainer">@color/on_error_container</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorSurfaceContainer">@color/surface_container</item>
+        <item name="colorOnSurface">@color/on_surface</item>
+        <item name="colorOutline">@color/outline</item>
+        <item name="android:windowBackground">@color/oled_black</item>
+        <item name="android:statusBarColor">@color/oled_black</item>
+        <item name="android:navigationBarColor">@color/oled_black</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+
+    <style name="Theme.WireFinder.NoActionBar" parent="Theme.WireFinder">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+    </style>
+
+    <style name="Theme.WireFinder.AppBarOverlay" parent="ThemeOverlay.Material3.Dark.ActionBar" />
+    <style name="Theme.WireFinder.PopupOverlay" parent="ThemeOverlay.Material3.Dark" />
+
+    <!-- Crash log screen (runs in its own process) -->
+    <style name="Theme.WireFinder.Crash" parent="Theme.WireFinder.NoActionBar">
+        <item name="android:windowBackground">@color/oled_black</item>
+    </style>
+
+    <!-- Splash theme for launcher -->
+    <style name="Theme.WireFinder.Splash" parent="Theme.WireFinder">
+        <item name="android:windowBackground">@drawable/splash_background</item>
+    </style>
+</resources>

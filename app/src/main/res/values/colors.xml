@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- OLED black and dark grays -->
+    <color name="oled_black">#000000</color>
+    <color name="dark_gray">#0F0F0F</color>
+    <color name="dark_gray_raised">#141414</color>
+
+    <!-- Primary - Material You lavender (replaced by dynamic color on Android 12+) -->
+    <color name="primary">#D0BCFF</color>
+    <color name="primary_container">#4F378B</color>
+    <color name="on_primary">#381E72</color>
+    <color name="on_primary_container">#EADDFF</color>
+
+    <!-- Secondary - Muted purple -->
+    <color name="secondary">#CBC2DB</color>
+    <color name="secondary_container">#4A4458</color>
+    <color name="on_secondary">#332D41</color>
+    <color name="on_secondary_container">#E8DEF8</color>
+
+    <!-- Tertiary - Pink -->
+    <color name="tertiary">#EFB8C8</color>
+    <color name="tertiary_container">#633B48</color>
+    <color name="on_tertiary">#492532</color>
+    <color name="on_tertiary_container">#FFD8E4</color>
+
+    <!-- Error - Red tones -->
+    <color name="error">#F2B8B5</color>
+    <color name="error_container">#8C1D18</color>
+    <color name="on_error">#601410</color>
+    <color name="on_error_container">#F9DEDC</color>
+
+    <!-- Surface / Background - OLED black + really dark gray -->
+    <color name="background">#000000</color>
+    <color name="on_background">#E6E1E5</color>
+    <color name="surface">#0F0F0F</color>
+    <color name="surface_container">#1D1B20</color>
+    <color name="surface_container_low">#1A1A1C</color>
+    <color name="surface_container_high">#26262B</color>
+    <color name="on_surface">#E6E1E5</color>
+    <color name="surface_variant">#49454F</color>
+    <color name="on_surface_variant">#CAC4D0</color>
+    <color name="outline">#938F99</color>
+
+    <!-- Status colors -->
+    <color name="online_green">#81C784</color>
+    <color name="offline_gray">#9E9E9E</color>
+    <color name="warning_orange">#FFB74D</color>
+</resources>
