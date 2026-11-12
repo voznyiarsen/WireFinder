@@ -57,31 +57,45 @@ object CsvParser {
             if (fields.size < 3) {
                 addError(
                     errors,
-                    "Line $lineNumber: Expected 3 fields (MAC,SSID,PASSWORD), got ${fields.size}"
+                    "Line $lineNumber: Expected at least 3 fields (MAC[,MAC,...],SSID,PASSWORD), got ${fields.size}"
                 )
                 continue
             }
 
-            val mac = fields[0].trim()
-            val ssid = fields[1].trim()
-            val password = fields[2].trim()
-
-            if (!isValidMac(mac)) {
-                addError(errors, "Line $lineNumber: Invalid MAC address '$mac'")
-                continue
-            }
+            // All fields except the last two are MAC addresses for the same SSID/password.
+            // Supports both "MAC1,MAC2,SSID,PASSWORD" and quoted '"MAC1,MAC2",SSID,PASSWORD".
+            val ssid = fields[fields.size - 2].trim()
+            val password = fields[fields.size - 1].trim()
 
             if (ssid.isEmpty()) {
                 addError(errors, "Line $lineNumber: Empty SSID")
                 continue
             }
 
-            val normalizedMac = APNetwork.normalizeMac(mac)
-            networks[normalizedMac] = APNetwork(
-                mac = normalizedMac,
-                ssid = ssid,
-                password = password
-            )
+            val macs = mutableListOf<String>()
+            for (i in 0 until fields.size - 2) {
+                for (part in fields[i].split(",")) {
+                    val m = part.trim()
+                    if (m.isNotEmpty()) macs.add(m)
+                }
+            }
+            if (macs.isEmpty()) {
+                addError(errors, "Line $lineNumber: No MAC addresses provided")
+                continue
+            }
+
+            for (mac in macs) {
+                if (!isValidMac(mac)) {
+                    addError(errors, "Line $lineNumber: Invalid MAC address '$mac'")
+                    continue
+                }
+                val normalizedMac = APNetwork.normalizeMac(mac)
+                networks[normalizedMac] = APNetwork(
+                    mac = normalizedMac,
+                    ssid = ssid,
+                    password = password
+                )
+            }
         }
 
         return ParseResult(networks.values.toList(), errors, linesParsed)

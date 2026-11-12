@@ -36,6 +36,7 @@ class NetworkMatcher {
     companion object {
         val NOTIFICATION_DEBOUNCE_MS = TimeUnit.MINUTES.toMillis(5)
         const val MIN_SIGNAL_STRENGTH_DBM = -85
+        const val PARTIAL_SSID_MIN_LEN = 4
     }
 
     fun updateKnownNetworks(networks: List<APNetwork>) {
@@ -85,6 +86,17 @@ class NetworkMatcher {
             val ssidMatch = maps.bySsid[normalizedSsid]
             if (ssidMatch != null) {
                 return checkDebounceAndReturn(ssidMatch, normalizedSsid)?.let {
+                    MatchResult(it, MatchType.SSID_ONLY)
+                }
+            }
+
+            // Partial SSID match: detect networks whose SSID contains or is contained by a known SSID.
+            val partial = maps.bySsid.entries.asSequence().firstOrNull { (known, _) ->
+                known.length >= PARTIAL_SSID_MIN_LEN &&
+                    (normalizedSsid.contains(known) || known.contains(normalizedSsid))
+            }?.value
+            if (partial != null) {
+                return checkDebounceAndReturn(partial, normalizedSsid)?.let {
                     MatchResult(it, MatchType.SSID_ONLY)
                 }
             }

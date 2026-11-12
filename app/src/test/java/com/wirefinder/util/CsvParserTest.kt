@@ -108,7 +108,19 @@ class CsvParserTest {
         
         assertEquals(0, result.networks.size)
         assertEquals(1, result.errors.size)
-        assertTrue(result.errors[0].contains("Expected 3 fields"))
+        assertTrue(result.errors[0].contains("Expected at least 3 fields"))
+    }
+
+    @Test
+    fun parseCsvContent_multipleMacsPerSsid() {
+        val content = "00:11:22:33:44:55,aa:bb:cc:dd:ee:ff,MyNetwork,password123\n\"11:22:33:44:55:66,22:33:44:55:66:77\",AnotherAP,secret456"
+        val result = CsvParser.parseCsvContent(content)
+        assertEquals(4, result.networks.size)
+        assertEquals(0, result.errors.size)
+        assertTrue(result.networks.any { it.mac == "00:11:22:33:44:55" && it.ssid == "MyNetwork" })
+        assertTrue(result.networks.any { it.mac == "aa:bb:cc:dd:ee:ff" && it.ssid == "MyNetwork" })
+        assertTrue(result.networks.any { it.mac == "11:22:33:44:55:66" && it.ssid == "AnotherAP" })
+        assertTrue(result.networks.any { it.mac == "22:33:44:55:66:77" && it.ssid == "AnotherAP" })
     }
 
     @Test
