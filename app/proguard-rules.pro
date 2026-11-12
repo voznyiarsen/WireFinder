@@ -16,3 +16,7 @@
 # SQLCipher uses JNI; keep native method holders and support factory entry point
 -keep class net.zetetic.database.sqlcipher.** { *; }
 -keep class net.zetetic.database.SupportOpenHelperFactory { *; }
+
+# KeePassJava2/Jackson optional StAX/AQute classes are not needed at runtime
+-dontwarn aQute.bnd.annotation.spi.ServiceProvider
+-dontwarn javax.xml.stream.**
