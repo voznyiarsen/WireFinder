@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
+import com.wirefinder.util.KeePassImporter
 import androidx.lifecycle.viewModelScope
 import com.wirefinder.data.KnownNetworkRepository
 import com.wirefinder.util.AppLog
@@ -49,6 +50,7 @@ class SettingsViewModel @Inject constructor(
         object NeedsBiometricDecrypt : LoadResult()
         object Encrypted : LoadResult()
         object DataCleared : LoadResult()
+        object NeedsPassword : LoadResult()
     }
 
     init {
@@ -222,6 +224,8 @@ class SettingsViewModel @Inject constructor(
     private val _encryptPending = MutableStateFlow(false)
     val encryptPending: StateFlow<Boolean> = _encryptPending
 
+    private val _keepassUri = MutableStateFlow<Uri?>(null)
+
     fun prepareBiometricEncrypt(): javax.crypto.Cipher? {
         return try {
             EncryptionService.createEncryptCipher()
@@ -284,6 +288,44 @@ class SettingsViewModel @Inject constructor(
             }
             preferencesManager.setCsvPath(null)
             _uiState.update { it.copy(csvPath = null) }
+        }
+    }
+
+    fun onKeePassSelected(uri: Uri) {
+        _keepassUri.value = uri
+        _loadResult.value = LoadResult.NeedsPassword
+    }
+
+    fun importKeePass(password: String) {
+        val uri = _keepassUri.value ?: return
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        KeePassImporter.import(stream, password)
+                    } ?: KeePassImporter.Result(emptyList(), listOf("Failed to open file"))
+                }
+                if (result.networks.isNotEmpty()) {
+                    knownNetworkRepository.import(result.networks)
+                    _uiState.update { it.copy(isLoading = false) }
+                    _loadResult.value = LoadResult.Success(result.networks.size, result.errors)
+                } else {
+                    _uiState.update { it.copy(isLoading = false) }
+                    _loadResult.value = LoadResult.Error(
+                        "No valid networks found in KeePass database",
+                        result.errors.joinToString("\n")
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false) }
+                _loadResult.value = LoadResult.Error(
+                    "Failed to import KeePass database: ${e.message}",
+                    AppLog.getStackTraceString(e)
+                )
+            } finally {
+                _keepassUri.value = null
+            }
         }
     }
 

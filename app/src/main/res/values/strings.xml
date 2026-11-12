@@ -35,6 +35,7 @@
     <string name="pref_category_data">Data Management</string>
     <string name="pref_current_csv">Current CSV: %s</string>
     <string name="pref_change_csv">Change CSV File</string>
+    <string name="pref_import_keepass">Import from KeePass (.kdbx)</string>
     <string name="pref_encryption_summary">Stored CSV files are encrypted with AES-256 using a key locked behind your fingerprint or device login.</string>
     <string name="pref_scan_interval">Scan Interval (minutes)</string>
     <string name="pref_scan_interval_summary">How often to scan for networks in background</string>

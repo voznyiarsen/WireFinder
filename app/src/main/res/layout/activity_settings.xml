@@ -72,6 +72,14 @@
                         android:text="@string/pref_change_csv"
                         style="@style/Widget.Material3.Button.OutlinedButton" />
 
+                    <Button
+                        android:id="@+id/btnImportKeePass"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/pref_import_keepass"
+                        style="@style/Widget.Material3.Button.OutlinedButton" />
+
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"

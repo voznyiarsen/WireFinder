@@ -20,6 +20,13 @@ class KnownNetworkRepository @Inject constructor(
         networkMatcher.updateKnownNetworks(networks)
     }
 
+    suspend fun import(networks: List<APNetwork>) {
+        if (networks.isNotEmpty()) {
+            apNetworkDao.insertAll(networks)
+        }
+        reload()
+    }
+
     suspend fun reload() {
         networkMatcher.updateKnownNetworks(apNetworkDao.getAllNetworksOnce())
     }

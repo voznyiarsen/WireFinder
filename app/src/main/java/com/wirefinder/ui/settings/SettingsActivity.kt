@@ -31,6 +31,10 @@ class SettingsActivity : AppCompatActivity() {
         uri?.let { viewModel.onCsvSelected(it) }
     }
 
+    private val pickKeePassLauncher = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        uri?.let { viewModel.onKeePassSelected(it) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivitySettingsBinding.inflate(layoutInflater)
@@ -127,6 +131,9 @@ class SettingsActivity : AppCompatActivity() {
             is SettingsViewModel.LoadResult.DataCleared -> {
                 Toast.makeText(this, R.string.toast_csv_cleared, Toast.LENGTH_SHORT).show()
             }
+            is SettingsViewModel.LoadResult.NeedsPassword -> {
+                showPasswordDialog(forKeePass = true)
+            }
         }
         viewModel.dismissLoadResult()
     }
@@ -180,17 +187,21 @@ class SettingsActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun showPasswordDialog() {
+    private fun showPasswordDialog(forKeePass: Boolean = false) {
         val dialogView = layoutInflater.inflate(R.layout.dialog_password, null)
         val passwordInput = dialogView.findViewById<com.google.android.material.textfield.TextInputEditText>(R.id.password_input)
-        
+
         MaterialAlertDialogBuilder(this)
             .setTitle(R.string.dialog_password_title)
             .setView(dialogView)
             .setPositiveButton(R.string.btn_ok) { _, _ ->
                 val password = passwordInput.text.toString()
                 if (password.isNotEmpty()) {
-                    viewModel.retryWithPassword(password)
+                    if (forKeePass) {
+                        viewModel.importKeePass(password)
+                    } else {
+                        viewModel.retryWithPassword(password)
+                    }
                 }
             }
             .setNegativeButton(R.string.btn_cancel, null)
@@ -206,6 +217,16 @@ class SettingsActivity : AppCompatActivity() {
                     "text/plain",
                     "application/vnd.ms-excel",
                     "application/octet-stream"
+                )
+            )
+        }
+
+        binding.btnImportKeePass.setOnClickListener {
+            pickKeePassLauncher.launch(
+                arrayOf(
+                    "application/x-keepass2",
+                    "application/octet-stream",
+                    "*/*"
                 )
             )
         }

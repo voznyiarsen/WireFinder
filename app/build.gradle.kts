@@ -43,6 +43,17 @@ android {
         viewBinding = true
         buildConfig = true
     }
+
+    packaging {
+        resources {
+            excludes += "META-INF/LICENSE.md"
+            excludes += "META-INF/LICENSE.txt"
+            excludes += "META-INF/NOTICE.md"
+            excludes += "META-INF/NOTICE.txt"
+            excludes += "META-INF/DEPENDENCIES"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+        }
+    }
 }
 
 dependencies {
@@ -83,6 +94,9 @@ dependencies {
 
     // QR code generation
     implementation("com.google.zxing:core:3.5.3")
+
+    // KeePass KDBX import
+    implementation("org.linguafranca.pwdb:KeePassJava2:3.1.0")
 
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")

@@ -130,7 +130,7 @@ object CsvParser {
         return fields
     }
 
-    private fun isValidMac(mac: String): Boolean {
+    fun isValidMac(mac: String): Boolean {
         var hexDigits = 0
         for (c in mac) {
             when {
