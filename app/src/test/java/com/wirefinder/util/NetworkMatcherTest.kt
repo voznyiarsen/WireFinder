@@ -143,6 +143,7 @@ class NetworkMatcherTest {
         val result1 = matcher.matchNetwork("00-11-22-33-44-55", "MyNetwork", -50)
         assertNotNull(result1)
 
+        matcher.clearAllDebounce()
         val result2 = matcher.matchNetwork("001122334455", "MyNetwork", -50)
         assertNotNull(result2)
     }

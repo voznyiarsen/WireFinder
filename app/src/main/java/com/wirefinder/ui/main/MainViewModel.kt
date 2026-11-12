@@ -3,6 +3,7 @@ package com.wirefinder.ui.main
 import android.Manifest
 import android.app.Activity
 import android.content.BroadcastReceiver
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -24,8 +25,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.wirefinder.R
 import com.wirefinder.data.APNetwork
-import com.wirefinder.data.APNetworkDao
+import com.wirefinder.data.DetectionUpdate
+import com.wirefinder.data.KnownNetworkRepository
 import com.wirefinder.util.AppLog
+import com.wirefinder.util.CsvFileStore
 import com.wirefinder.util.CsvParser
 import com.wirefinder.util.EncryptionService
 import com.wirefinder.util.PreferencesManager
@@ -36,6 +39,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -43,12 +47,11 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
 class MainViewModel @Inject constructor(
-    private val apNetworkDao: APNetworkDao,
+    private val knownNetworkRepository: KnownNetworkRepository,
     private val preferencesManager: PreferencesManager,
     @ApplicationContext private val context: Context
 ) : ViewModel() {
@@ -66,9 +69,14 @@ class MainViewModel @Inject constructor(
     val connectResult: StateFlow<ConnectResult?> = _connectResult
 
     private var scanTimeoutJob: Job? = null
+    private var scanReceiver: BroadcastReceiver? = null
+    private var scanReceiverRegistered = false
     private var connectTimeoutJob: Job? = null
+    @Volatile
     private var connectHandled = false
+    @Volatile
     private var activeConnectCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile
     private var activeConnectivityManager: ConnectivityManager? = null
 
     data class UiState(
@@ -145,26 +153,33 @@ class MainViewModel @Inject constructor(
     private fun loadInitialData() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            
-            // Load saved CSV path
-            val savedPath = preferencesManager.csvPath.first()
-            if (savedPath != null) {
+
+            val snapshot = preferencesManager.snapshot()
+            val savedPath = snapshot.csvPath
+            val knownNetworks = knownNetworkRepository.getAll()
+
+            if (savedPath != null && knownNetworks.isEmpty()) {
+                _uiState.update { it.copy(csvPath = savedPath) }
                 loadCsvFromPath(savedPath)
             } else {
-                _uiState.update { it.copy(isLoading = false) }
+                _uiState.update { it.copy(isLoading = false, csvPath = savedPath) }
+                if (knownNetworks.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { knownNetworkRepository.reload() }
+                }
             }
 
-            // Show only APs detected within the last scan window (2x scan interval)
-            val interval = preferencesManager.scanIntervalMinutes.first()
-            val detectedWindowMs = maxOf(2 * 60_000L, interval * 2 * 60_000L)
-            
-            // Observe network changes from database
-            apNetworkDao.getAllNetworks().onEach { networks ->
+            combine(
+                knownNetworkRepository.observeAll(),
+                preferencesManager.scanIntervalMinutes
+            ) { networks, interval ->
                 val now = System.currentTimeMillis()
+                val detectedWindowMs = maxOf(MIN_DETECTED_WINDOW_MS, interval * 2 * 60_000L)
                 val detected = networks.filter {
                     it.lastSeen > 0 && now - it.lastSeen < detectedWindowMs
                 }
-                _uiState.update { it.copy(networks = detected, hasCsv = networks.isNotEmpty()) }
+                detected to networks.isNotEmpty()
+            }.onEach { (detected, hasNetworks) ->
+                _uiState.update { it.copy(networks = detected, hasCsv = hasNetworks) }
             }.launchIn(viewModelScope)
         }
     }
@@ -175,9 +190,8 @@ class MainViewModel @Inject constructor(
             _csvLoadResult.value = null
 
             try {
-                val file = withContext(Dispatchers.IO) { copyUriToFile(uri) }
+                val file = withContext(Dispatchers.IO) { CsvFileStore.copyFromUri(context, uri) }
                 if (file != null) {
-                    // Save the path for persistence
                     preferencesManager.setCsvPath(file.absolutePath)
                     loadCsvFromPath(file.absolutePath)
                 } else {
@@ -193,33 +207,6 @@ class MainViewModel @Inject constructor(
         }
     }
 
-    private fun copyUriToFile(uri: Uri): File? {
-        return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val permanentFile = File(context.filesDir, "selected_networks.csv")
-            val outputStream = FileOutputStream(permanentFile)
-            try {
-                val buffer = ByteArray(8192)
-                var total = 0L
-                var read: Int
-                while (inputStream.read(buffer).also { read = it } != -1) {
-                    total += read
-                    if (total > MAX_CSV_SIZE) {
-                        return null
-                    }
-                    outputStream.write(buffer, 0, read)
-                }
-            } finally {
-                inputStream.close()
-                outputStream.close()
-            }
-            permanentFile
-        } catch (e: Exception) {
-            File(context.filesDir, "selected_networks.csv").delete()
-            null
-        }
-    }
-
     fun loadCsvFromPath(path: String, password: String? = null) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, error = null) }
@@ -231,7 +218,7 @@ class MainViewModel @Inject constructor(
                     _csvLoadResult.value = CsvLoadResult.Error("File not found: $path")
                     return@withContext
                 }
-                if (file.length() > MAX_CSV_SIZE) {
+                if (file.length() > CsvFileStore.MAX_CSV_SIZE) {
                     _uiState.update { it.copy(isLoading = false) }
                     _csvLoadResult.value = CsvLoadResult.Error(
                         context.getString(R.string.csv_too_large)
@@ -245,7 +232,6 @@ class MainViewModel @Inject constructor(
                         _csvLoadResult.value = CsvLoadResult.NeedsBiometricDecrypt
                     }
                     EncryptionService.FileFormat.PASSWORD_ENCRYPTED -> {
-                        // Legacy WFC1 file: password flow (never persisted)
                         if (password.isNullOrEmpty()) {
                             _uiState.update { it.copy(isLoading = false) }
                             _csvLoadResult.value = CsvLoadResult.Error("Password required")
@@ -253,25 +239,46 @@ class MainViewModel @Inject constructor(
                         }
                         try {
                             val decryptedContent = EncryptionService.decryptToString(file, password)
-                            parseAndStore(decryptedContent, path)
+                            storeResult(
+                                CsvParser.parseCsvContent(decryptedContent),
+                                path,
+                                needsEncryption = false
+                            )
                         } catch (e: SecurityException) {
                             _uiState.update { it.copy(isLoading = false) }
                             _csvLoadResult.value = CsvLoadResult.Error("Password required")
                         }
                     }
                     EncryptionService.FileFormat.PLAINTEXT -> {
-                        // Plaintext: load immediately, then prompt to secure the stored copy
-                        parseAndStore(file.readText(), path)
+                        storeResult(
+                            CsvParser.parseCsv(file),
+                            path,
+                            needsEncryption = true
+                        )
                     }
                 }
             }
         }
     }
 
-    private suspend fun parseAndStore(content: String, path: String) {
-        val result = withContext(Dispatchers.IO) { CsvParser.parseCsvContent(content) }
+    private suspend fun storeResult(
+        result: CsvParser.ParseResult,
+        path: String,
+        needsEncryption: Boolean
+    ) {
         if (result.networks.isNotEmpty()) {
-            apNetworkDao.insertAll(result.networks)
+            try {
+                knownNetworkRepository.replace(result.networks)
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(isLoading = false, error = "Failed to store networks: ${e.message}")
+                }
+                _csvLoadResult.value = CsvLoadResult.Error(
+                    "Failed to store networks",
+                    AppLog.getStackTraceString(e)
+                )
+                return
+            }
             _uiState.update {
                 it.copy(
                     isLoading = false,
@@ -280,9 +287,6 @@ class MainViewModel @Inject constructor(
                     error = null
                 )
             }
-            // Stored copy is plaintext at this point; ask the user to secure it
-            val needsEncryption =
-                EncryptionService.detectFormat(File(path)) == EncryptionService.FileFormat.PLAINTEXT
             _csvLoadResult.value = CsvLoadResult.Success(
                 result.networks.size,
                 result.errors,
@@ -317,10 +321,12 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val path = _uiState.value.csvPath ?: return@launch
             try {
-                val content = withContext(Dispatchers.IO) {
-                    EncryptionService.decryptBiometricToString(File(path), cipher)
+                val result = withContext(Dispatchers.IO) {
+                    CsvParser.parseCsvContent(
+                        EncryptionService.decryptBiometricToString(File(path), cipher)
+                    )
                 }
-                parseAndStore(content, path)
+                storeResult(result, path, needsEncryption = false)
             } catch (e: Exception) {
                 AppLog.e(TAG, "Decrypt: biometric decryption failed", e)
                 _uiState.update { it.copy(isLoading = false) }
@@ -381,6 +387,7 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 _uiState.value.csvPath?.let { File(it).delete() }
+                CsvFileStore.delete(context)
             }
             preferencesManager.setCsvPath(null)
             _uiState.update { it.copy(csvPath = null, hasCsv = false, error = null) }
@@ -389,7 +396,8 @@ class MainViewModel @Inject constructor(
 
     fun clearCsv() {
         viewModelScope.launch {
-            apNetworkDao.clearAll()
+            knownNetworkRepository.clear()
+            withContext(Dispatchers.IO) { CsvFileStore.delete(context) }
             preferencesManager.setCsvPath(null)
             _uiState.update { it.copy(networks = emptyList(), csvPath = null, hasCsv = false, error = null) }
         }
@@ -399,6 +407,7 @@ class MainViewModel @Inject constructor(
         _uiState.value.csvPath?.let { loadCsvFromPath(it) }
     }
 
+    @SuppressLint("MissingPermission")
     fun manualScan() {
         if (_uiState.value.isScanning) return
         viewModelScope.launch {
@@ -446,7 +455,7 @@ class MainViewModel @Inject constructor(
                 return@launch
             }
 
-            val known = apNetworkDao.getAllNetworksOnce()
+            val known = knownNetworkRepository.getAll()
             if (known.isEmpty()) {
                 _manualScanResult.value = ManualScanResult.None()
                 return@launch
@@ -458,27 +467,24 @@ class MainViewModel @Inject constructor(
             val receiver = object : BroadcastReceiver() {
                 override fun onReceive(c: Context?, intent: Intent?) {
                     if (intent?.action != WifiManager.SCAN_RESULTS_AVAILABLE_ACTION) return
-                    context.unregisterReceiver(this)
+                    unregisterScanReceiver()
                     if (!completed) {
                         completed = true
+                        scanTimeoutJob?.cancel()
                         viewModelScope.launch {
                             processScanResults(known, wifiManager.scanResults)
                         }
                     }
                 }
             }
-            context.registerReceiver(
-                receiver,
-                IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION),
-                Context.RECEIVER_NOT_EXPORTED
-            )
+            registerScanReceiver(receiver)
 
             val started = try {
                 wifiManager.startScan()
             } catch (e: SecurityException) {
                 AppLog.e(TAG, "Manual scan: SecurityException on startScan", e)
                 _uiState.update { it.copy(isScanning = false) }
-                context.unregisterReceiver(receiver)
+                unregisterScanReceiver()
                 val missingNow = requiredPermissions.filter {
                     ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
                 }
@@ -500,7 +506,7 @@ class MainViewModel @Inject constructor(
             if (!started) {
                 AppLog.e(TAG, "Manual scan: startScan() returned false")
                 _uiState.update { it.copy(isScanning = false) }
-                context.unregisterReceiver(receiver)
+                unregisterScanReceiver()
                 val cached = wifiManager.scanResults
                 if (cached.isNotEmpty()) {
                     processScanResults(
@@ -524,7 +530,7 @@ class MainViewModel @Inject constructor(
                 delay(10_000)
                 if (!completed) {
                     completed = true
-                    context.unregisterReceiver(receiver)
+                    unregisterScanReceiver()
                     val locationManager = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
                     val locationOff = locationManager?.isLocationEnabled == false
                     val cached = wifiManager.scanResults
@@ -583,9 +589,11 @@ class MainViewModel @Inject constructor(
         }
         matches.sortByDescending { it.signalStrength }
         val now = System.currentTimeMillis()
-        for (match in matches) {
-            apNetworkDao.updateDetection(match.network.mac, now, match.signalStrength, match.matchType)
-        }
+        knownNetworkRepository.recordDetections(
+            matches.map {
+                DetectionUpdate(it.network.mac, now, it.signalStrength, it.matchType)
+            }
+        )
         _uiState.update { it.copy(isScanning = false) }
         _manualScanResult.value = if (matches.isEmpty()) {
             ManualScanResult.None(note)
@@ -645,8 +653,8 @@ class MainViewModel @Inject constructor(
                 .build()
 
             val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            finishConnectAttempt()
             connectHandled = false
-            connectTimeoutJob?.cancel()
 
             val callback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(net: Network) {
@@ -669,11 +677,16 @@ class MainViewModel @Inject constructor(
                 }
 
                 override fun onLost(net: Network) {
+                    if (connectHandled) return
+                    connectHandled = true
+                    finishConnectAttempt()
                     AppLog.i(TAG, "Disconnected from ${network.ssid}")
                     _connectResult.value = ConnectResult.Disconnected(network.ssid)
                 }
             }
 
+            activeConnectCallback = callback
+            activeConnectivityManager = connectivityManager
             try {
                 connectivityManager.requestNetwork(request, callback)
                 AppLog.i(TAG, "requestNetwork submitted for ${network.ssid}")
@@ -693,8 +706,6 @@ class MainViewModel @Inject constructor(
                 }
                 return@launch
             }
-            activeConnectCallback = callback
-            activeConnectivityManager = connectivityManager
 
             connectTimeoutJob = viewModelScope.launch {
                 delay(CONNECT_TIMEOUT_MS)
@@ -724,24 +735,61 @@ class MainViewModel @Inject constructor(
     }
 
     fun cancelConnect() {
-        viewModelScope.launch {
-            connectHandled = true
-            finishConnectAttempt()
-            _connectResult.value = null
-        }
+        connectHandled = true
+        finishConnectAttempt()
+        _connectResult.value = null
     }
 
     fun dismissConnectResult() {
         _connectResult.value = null
     }
 
-    private companion object {
-        const val TAG = "WireFinderScan"
-        const val CONNECT_TIMEOUT_MS = 60_000L
-        const val MAX_CSV_SIZE = 5L * 1024 * 1024
+    fun dismissCsvLoadResult() {
+        _csvLoadResult.value = null
     }
 
     fun dismissError() {
         _uiState.update { it.copy(error = null) }
+    }
+
+    private fun registerScanReceiver(receiver: BroadcastReceiver) {
+        unregisterScanReceiver()
+        try {
+            context.registerReceiver(
+                receiver,
+                IntentFilter(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+            scanReceiver = receiver
+            scanReceiverRegistered = true
+        } catch (e: Exception) {
+            AppLog.e(TAG, "Manual scan: failed to register receiver", e)
+        }
+    }
+
+    private fun unregisterScanReceiver() {
+        val receiver = scanReceiver
+        if (scanReceiverRegistered && receiver != null) {
+            try {
+                context.unregisterReceiver(receiver)
+            } catch (_: IllegalArgumentException) {
+            }
+        }
+        scanReceiverRegistered = false
+        scanReceiver = null
+    }
+
+    override fun onCleared() {
+        unregisterScanReceiver()
+        scanTimeoutJob?.cancel()
+        connectHandled = true
+        finishConnectAttempt()
+        super.onCleared()
+    }
+
+    private companion object {
+        const val TAG = "WireFinderScan"
+        const val CONNECT_TIMEOUT_MS = 60_000L
+        const val MIN_DETECTED_WINDOW_MS = 2 * 60_000L
     }
 }

@@ -16,7 +16,6 @@ android {
         versionCode = 1
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        vectorDrawables.useSupportLibrary = true
     }
 
     buildTypes {
@@ -42,11 +41,8 @@ android {
 
     buildFeatures {
         viewBinding = true
-        compose = false
         buildConfig = true
     }
-
-    namespace = "com.wirefinder"
 }
 
 dependencies {
@@ -59,6 +55,7 @@ dependencies {
 
     // Material3
     implementation("com.google.android.material:material:1.12.0")
+    implementation("androidx.recyclerview:recyclerview:1.3.2")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     // Room Database
@@ -80,10 +77,6 @@ dependencies {
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.0")
-
-    // File Picker (Activity Result API)
-    implementation("androidx.activity:activity:1.9.2")
 
     // Biometric authentication for encryption keys
     implementation("androidx.biometric:biometric:1.1.0")

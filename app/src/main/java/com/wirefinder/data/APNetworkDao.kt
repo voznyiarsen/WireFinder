@@ -4,8 +4,16 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import kotlinx.coroutines.flow.Flow
+
+data class DetectionUpdate(
+    val mac: String,
+    val lastSeen: Long,
+    val signal: Int,
+    val matchType: Int
+)
 
 @Dao
 interface APNetworkDao {
@@ -38,6 +46,13 @@ interface APNetworkDao {
 
     @Query("UPDATE ap_networks SET lastSeen = :lastSeen, lastSignalStrength = :signal, detectionCount = detectionCount + 1, lastMatchType = :matchType WHERE mac = :mac")
     suspend fun updateDetection(mac: String, lastSeen: Long, signal: Int, matchType: Int)
+
+    @Transaction
+    suspend fun updateDetections(updates: List<DetectionUpdate>) {
+        for (update in updates) {
+            updateDetection(update.mac, update.lastSeen, update.signal, update.matchType)
+        }
+    }
 
     @Query("SELECT COUNT(*) FROM ap_networks")
     suspend fun count(): Int

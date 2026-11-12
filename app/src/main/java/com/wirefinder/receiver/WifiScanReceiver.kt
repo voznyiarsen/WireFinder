@@ -4,7 +4,6 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
 import com.wirefinder.service.WifiScanForegroundService
 import timber.log.Timber
@@ -40,9 +39,7 @@ class WifiScanReceiver(private val service: WifiScanForegroundService) : Broadca
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             WifiManager.SCAN_RESULTS_AVAILABLE_ACTION -> {
-                val results = (context.getSystemService(Context.WIFI_SERVICE) as android.net.wifi.WifiManager)
-                    .scanResults ?: emptyList()
-                service.onScanResults(results)
+                service.onScanResultsAvailable()
             }
             WifiManager.WIFI_STATE_CHANGED_ACTION -> {
                 val state = intent.getIntExtra(WifiManager.EXTRA_WIFI_STATE, WifiManager.WIFI_STATE_UNKNOWN)

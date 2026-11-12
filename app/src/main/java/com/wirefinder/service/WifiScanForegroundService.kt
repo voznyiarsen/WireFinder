@@ -3,18 +3,20 @@ package com.wirefinder.service
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.pm.ServiceInfo
 import android.net.wifi.ScanResult
 import android.net.wifi.WifiManager
-import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
-import android.content.pm.ServiceInfo
+import androidx.core.app.NotificationCompat
 import com.wirefinder.R
-import com.wirefinder.data.AppDatabase
-import com.wirefinder.data.APNetworkDao
+import com.wirefinder.data.APNetwork
+import com.wirefinder.data.DetectionUpdate
+import com.wirefinder.data.KnownNetworkRepository
 import com.wirefinder.receiver.WifiScanReceiver
 import com.wirefinder.ui.main.MainActivity
 import com.wirefinder.util.NetworkMatcher
@@ -27,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -36,148 +39,111 @@ import timber.log.Timber
 class WifiScanForegroundService : Service() {
 
     private var wifiManager: WifiManager? = null
-    private var powerManager: PowerManager? = null
-    private var wakeLock: PowerManager.WakeLock? = null
-    
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var scanJob: Job? = null
     private var passiveReceiver: WifiScanReceiver? = null
-    private var networkMatcherRefreshJob: Job? = null
 
     @Inject lateinit var networkMatcher: NetworkMatcher
     @Inject lateinit var notificationService: NotificationService
     @Inject lateinit var preferencesManager: PreferencesManager
+    @Inject lateinit var knownNetworkRepository: KnownNetworkRepository
 
     companion object {
         const val FOREGROUND_SERVICE_CHANNEL_ID = "wifi_scan_service"
+
         fun createStartIntent(context: Context): Intent {
             return Intent(context, WifiScanForegroundService::class.java)
         }
+
         fun start(context: Context) {
             context.startForegroundService(createStartIntent(context))
         }
+
         fun stop(context: Context) {
             context.stopService(createStartIntent(context))
         }
     }
 
+    private val foregroundNotification: Notification by lazy { createForegroundNotification() }
+
     override fun onCreate() {
         super.onCreate()
         wifiManager = getSystemService(Context.WIFI_SERVICE) as WifiManager
-        powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        
-        // Acquire wake lock for background scanning
-        wakeLock = powerManager?.newWakeLock(
-            PowerManager.PARTIAL_WAKE_LOCK,
-            "WireFinder::WifiScanWakeLock"
-        )
-        
-        // Create foreground service notification channel
         createNotificationChannel()
-        
-        // Register passive scan receiver
-        passiveReceiver = WifiScanReceiver(this)
-        passiveReceiver?.register()
-        
-        // Load initial networks from database
-        loadNetworksFromDatabase()
-        
-        // Start periodic network matcher refresh
-        startNetworkMatcherRefresh()
+
+        passiveReceiver = WifiScanReceiver(this).also { it.register() }
+
+        scope.launch {
+            knownNetworkRepository.reload()
+        }
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                FOREGROUND_SERVICE_CHANNEL_ID,
-                getString(R.string.foreground_service_channel_name),
-                NotificationManager.IMPORTANCE_LOW
-            ).apply {
-                description = getString(R.string.foreground_service_channel_desc)
-            }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
+        val channel = NotificationChannel(
+            FOREGROUND_SERVICE_CHANNEL_ID,
+            getString(R.string.foreground_service_channel_name),
+            NotificationManager.IMPORTANCE_LOW
+        ).apply {
+            description = getString(R.string.foreground_service_channel_desc)
         }
-    }
-
-    private fun loadNetworksFromDatabase() {
-        scope.launch {
-            val db = AppDatabase.getDatabase(this@WifiScanForegroundService)
-            val networks = db.apNetworkDao().getAllNetworksOnce()
-            if (networks.isNotEmpty()) {
-                networkMatcher.updateKnownNetworks(networks)
-                Timber.i("Loaded ${networks.size} networks into NetworkMatcher from database")
-            }
-        }
-    }
-
-    private fun startNetworkMatcherRefresh() {
-        networkMatcherRefreshJob?.cancel()
-        networkMatcherRefreshJob = scope.launch {
-            while (isActive) {
-                // Refresh every 5 minutes to pick up any database changes
-                kotlinx.coroutines.delay(5 * 60 * 1000L)
-                loadNetworksFromDatabase()
-            }
-        }
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.createNotificationChannel(channel)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = createForegroundNotification()
-        startForeground(1, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
-        
-        // Start periodic scanning
+        startForeground(1, foregroundNotification, ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
         startPeriodicScanning()
-        
         return START_STICKY
     }
 
     private fun createForegroundNotification(): Notification {
         val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = android.app.PendingIntent.getActivity(
-            this, 0, intent,
-            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return androidx.core.app.NotificationCompat.Builder(this, FOREGROUND_SERVICE_CHANNEL_ID)
+        return NotificationCompat.Builder(this, FOREGROUND_SERVICE_CHANNEL_ID)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(getString(R.string.scanning_active))
             .setSmallIcon(R.drawable.ic_notification_wifi)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
     }
 
     private fun startPeriodicScanning() {
-        scanJob?.cancel()
+        if (scanJob?.isActive == true) return
         scanJob = scope.launch {
             while (isActive) {
-                val enabled = preferencesManager.scanningEnabled.first()
-                if (enabled) {
-                    val interval = preferencesManager.scanIntervalMinutes.first()
-                    performScan()
-                    val delayMs = interval * 60 * 1000L
-                    kotlinx.coroutines.delay(delayMs)
-                } else {
+                if (!preferencesManager.scanningEnabled.first()) {
                     Timber.i("Scanning disabled in settings, stopping service")
                     stopSelf()
                     break
                 }
+                val interval = preferencesManager.scanIntervalMinutes.first()
+                requestScan()
+                delay(interval * 60 * 1000L)
             }
         }
     }
 
     internal fun performScan() {
-        // ACCESS_FINE_LOCATION required for Wi-Fi scanning on all versions
+        scope.launch { requestScan() }
+    }
+
+    private suspend fun requestScan() {
         if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) !=
-            android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            PackageManager.PERMISSION_GRANTED
+        ) {
             Timber.w("Missing ACCESS_FINE_LOCATION permission for scanning")
             return
         }
 
-        wakeLock?.acquire(10000)
-        
         try {
             val success = wifiManager?.startScan() ?: false
             if (!success) {
@@ -187,44 +153,72 @@ class WifiScanForegroundService : Service() {
             }
         } catch (e: SecurityException) {
             Timber.e(e, "Security exception during Wi-Fi scan")
-        } finally {
-            wakeLock?.release()
         }
     }
 
-    /**
-     * Called by WifiScanReceiver when scan results are available.
-     */
-    fun onScanResults(results: List<ScanResult>) {
-        Timber.d("Received ${results.size} scan results")
-        
+    fun onScanResultsAvailable() {
+        scope.launch {
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) !=
+                PackageManager.PERMISSION_GRANTED
+            ) {
+                return@launch
+            }
+            val results = wifiManager?.scanResults ?: return@launch
+            if (results.isNotEmpty()) {
+                processScanResults(results)
+            }
+        }
+    }
+
+    private suspend fun processScanResults(results: List<ScanResult>) {
+        val bestByBssid = HashMap<String, ScanResult>(results.size)
         for (result in results) {
-            val matchedNetwork = networkMatcher.matchNetwork(
+            val bssid = APNetwork.normalizeMac(result.BSSID)
+            if (bssid.isEmpty() || bssid == "00:00:00:00:00:00") continue
+            val existing = bestByBssid[bssid]
+            if (existing == null || result.level > existing.level) {
+                bestByBssid[bssid] = result
+            }
+        }
+        if (bestByBssid.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        val updates = ArrayList<DetectionUpdate>(bestByBssid.size)
+        val matches = ArrayList<Pair<NetworkMatcher.MatchResult, Int>>(bestByBssid.size)
+
+        for (result in bestByBssid.values) {
+            val matched = networkMatcher.matchNetwork(
                 result.BSSID,
-                result.SSID.replace("\"", ""), // Remove quotes from SSID
+                result.SSID.replace("\"", ""),
                 result.level,
                 requireBssid = true
+            ) ?: continue
+            matches.add(matched to result.level)
+            updates.add(
+                DetectionUpdate(
+                    mac = matched.network.mac,
+                    lastSeen = now,
+                    signal = result.level,
+                    matchType = matched.type.dbValue
+                )
             )
-            
-            if (matchedNetwork != null) {
-                val network = matchedNetwork.network
-                Timber.i("Matched known network: ${network.ssid} (${network.mac}) at ${result.level} dBm (${matchedNetwork.type})")
-                notificationService.showNetworkDetectedNotification(network, result.level)
-                
-                // Update last seen in database
-                scope.launch {
-                    val db = AppDatabase.getDatabase(this@WifiScanForegroundService)
-                    db.apNetworkDao().updateDetection(network.mac, System.currentTimeMillis(), result.level, matchedNetwork.type.dbValue)
-                }
-            }
+        }
+
+        knownNetworkRepository.recordDetections(updates)
+
+        for ((match, level) in matches) {
+            val network = match.network
+            Timber.i(
+                "Matched known network: ${network.ssid} (${network.mac}) " +
+                    "(${match.type}) at $level dBm"
+            )
+            notificationService.showNetworkDetectedNotification(network, level)
         }
     }
 
     override fun onDestroy() {
         scanJob?.cancel()
-        networkMatcherRefreshJob?.cancel()
         passiveReceiver?.unregister()
-        wakeLock?.release()
         scope.coroutineContext.cancelChildren()
         super.onDestroy()
     }

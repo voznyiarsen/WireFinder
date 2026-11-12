@@ -5,8 +5,9 @@ import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.wirefinder.data.APNetworkDao
+import com.wirefinder.data.KnownNetworkRepository
 import com.wirefinder.util.AppLog
+import com.wirefinder.util.CsvFileStore
 import com.wirefinder.util.CsvParser
 import com.wirefinder.util.EncryptionService
 import com.wirefinder.util.PreferencesManager
@@ -15,17 +16,15 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileOutputStream
 import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val apNetworkDao: APNetworkDao,
+    private val knownNetworkRepository: KnownNetworkRepository,
     private val preferencesManager: PreferencesManager,
     @ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
@@ -59,20 +58,15 @@ class SettingsViewModel @Inject constructor(
     private fun loadSettings() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
-            
-            val csvPath = preferencesManager.csvPath.first()
-            val scanInterval = preferencesManager.scanIntervalMinutes.first()
-            val scanningEnabled = preferencesManager.scanningEnabled.first()
-            val flagSecure = preferencesManager.flagSecure.first()
-            
-            _uiState.update { 
+            val snapshot = preferencesManager.snapshot()
+            _uiState.update {
                 it.copy(
-                    csvPath = csvPath,
-                    scanIntervalMinutes = scanInterval,
-                    scanningEnabled = scanningEnabled,
-                    flagSecureEnabled = flagSecure,
+                    csvPath = snapshot.csvPath,
+                    scanIntervalMinutes = snapshot.scanIntervalMinutes,
+                    scanningEnabled = snapshot.scanningEnabled,
+                    flagSecureEnabled = snapshot.flagSecure,
                     isLoading = false
-                ) 
+                )
             }
         }
     }
@@ -83,10 +77,13 @@ class SettingsViewModel @Inject constructor(
             _loadResult.value = null
             
             try {
-                val file = withContext(Dispatchers.IO) { copyUriToFile(uri) }
+                val file = withContext(Dispatchers.IO) { CsvFileStore.copyFromUri(context, uri) }
                 if (file != null) {
                     preferencesManager.setCsvPath(file.absolutePath)
                     loadCsvFromPath(file.absolutePath)
+                } else {
+                    _uiState.update { it.copy(isLoading = false) }
+                    _loadResult.value = LoadResult.Error("Failed to access selected file")
                 }
             } catch (e: Exception) {
                 _uiState.update { it.copy(isLoading = false) }
@@ -95,33 +92,6 @@ class SettingsViewModel @Inject constructor(
                     AppLog.getStackTraceString(e)
                 )
             }
-        }
-    }
-
-    private fun copyUriToFile(uri: Uri): File? {
-        return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val permanentFile = File(context.filesDir, "selected_networks.csv")
-            val outputStream = FileOutputStream(permanentFile)
-            try {
-                val buffer = ByteArray(8192)
-                var total = 0L
-                var read: Int
-                while (inputStream.read(buffer).also { read = it } != -1) {
-                    total += read
-                    if (total > MAX_CSV_SIZE) {
-                        return null
-                    }
-                    outputStream.write(buffer, 0, read)
-                }
-            } finally {
-                inputStream.close()
-                outputStream.close()
-            }
-            permanentFile
-        } catch (e: Exception) {
-            File(context.filesDir, "selected_networks.csv").delete()
-            null
         }
     }
 
@@ -136,7 +106,7 @@ class SettingsViewModel @Inject constructor(
                     _loadResult.value = LoadResult.Error("File not found")
                     return@withContext
                 }
-                if (file.length() > MAX_CSV_SIZE) {
+                if (file.length() > CsvFileStore.MAX_CSV_SIZE) {
                     _uiState.update { it.copy(isLoading = false) }
                     _loadResult.value = LoadResult.Error(
                         context.getString(com.wirefinder.R.string.csv_too_large)
@@ -158,30 +128,47 @@ class SettingsViewModel @Inject constructor(
                         }
                         try {
                             val decryptedContent = EncryptionService.decryptToString(file, password)
-                            parseAndStore(decryptedContent, path)
+                            storeResult(
+                                CsvParser.parseCsvContent(decryptedContent),
+                                path,
+                                needsEncryption = false
+                            )
                         } catch (e: SecurityException) {
                             _uiState.update { it.copy(isLoading = false) }
                             _loadResult.value = LoadResult.Error("Password required")
                         }
                     }
                     EncryptionService.FileFormat.PLAINTEXT -> {
-                        parseAndStore(file.readText(), path)
+                        storeResult(
+                            CsvParser.parseCsv(file),
+                            path,
+                            needsEncryption = true
+                        )
                     }
                 }
             }
         }
     }
 
-    private suspend fun parseAndStore(content: String, path: String) {
-        val result = withContext(Dispatchers.IO) { CsvParser.parseCsvContent(content) }
+    private suspend fun storeResult(
+        result: CsvParser.ParseResult,
+        path: String,
+        needsEncryption: Boolean
+    ) {
         if (result.networks.isNotEmpty()) {
-            apNetworkDao.insertAll(result.networks)
+            try {
+                knownNetworkRepository.replace(result.networks)
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isLoading = false) }
+                _loadResult.value = LoadResult.Error(
+                    "Failed to store networks",
+                    AppLog.getStackTraceString(e)
+                )
+                return
+            }
             _uiState.update { it.copy(isLoading = false, csvPath = path) }
             _loadResult.value = LoadResult.Success(result.networks.size, result.errors)
-            if (withContext(Dispatchers.IO) {
-                    EncryptionService.detectFormat(File(path)) == EncryptionService.FileFormat.PLAINTEXT
-                }
-            ) {
+            if (needsEncryption) {
                 promptEncrypt()
             }
         } else {
@@ -211,10 +198,12 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val path = _uiState.value.csvPath ?: return@launch
             try {
-                val content = withContext(Dispatchers.IO) {
-                    EncryptionService.decryptBiometricToString(File(path), cipher)
+                val result = withContext(Dispatchers.IO) {
+                    CsvParser.parseCsvContent(
+                        EncryptionService.decryptBiometricToString(File(path), cipher)
+                    )
                 }
-                parseAndStore(content, path)
+                storeResult(result, path, needsEncryption = false)
             } catch (e: Exception) {
                 AppLog.e("WireFinderScan", "Settings decrypt: biometric decryption failed", e)
                 _uiState.update { it.copy(isLoading = false) }
@@ -227,9 +216,7 @@ class SettingsViewModel @Inject constructor(
     }
 
     private fun promptEncrypt() {
-        viewModelScope.launch {
-            _encryptPending.value = true
-        }
+        _encryptPending.value = true
     }
 
     private val _encryptPending = MutableStateFlow(false)
@@ -279,8 +266,8 @@ class SettingsViewModel @Inject constructor(
         _encryptPending.value = false
     }
 
-    private companion object {
-        const val MAX_CSV_SIZE = 5L * 1024 * 1024
+    fun dismissLoadResult() {
+        _loadResult.value = null
     }
 
     fun retryWithPassword(password: String) {
@@ -293,6 +280,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 _uiState.value.csvPath?.let { File(it).delete() }
+                CsvFileStore.delete(context)
             }
             preferencesManager.setCsvPath(null)
             _uiState.update { it.copy(csvPath = null) }
@@ -300,9 +288,13 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setScanInterval(interval: Int) {
+        val clamped = interval.coerceIn(
+            PreferencesManager.MIN_SCAN_INTERVAL,
+            PreferencesManager.MAX_SCAN_INTERVAL
+        )
         viewModelScope.launch {
-            preferencesManager.setScanIntervalMinutes(interval)
-            _uiState.update { it.copy(scanIntervalMinutes = interval) }
+            preferencesManager.setScanIntervalMinutes(clamped)
+            _uiState.update { it.copy(scanIntervalMinutes = clamped) }
         }
     }
 
@@ -328,11 +320,9 @@ class SettingsViewModel @Inject constructor(
     fun clearAllData() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
-                // Delete the stored CSV (contains all passwords)
                 _uiState.value.csvPath?.let { File(it).delete() }
-                // Delete crash log
+                CsvFileStore.delete(context)
                 File(context.filesDir, "crash_log.txt").delete()
-                // Delete any legacy plaintext database backups
                 val dbDir = context.getDatabasePath("wirefinder_db").parentFile
                 if (dbDir != null) {
                     for (suffix in listOf("", "-wal", "-shm")) {
@@ -340,10 +330,15 @@ class SettingsViewModel @Inject constructor(
                     }
                 }
             }
-            apNetworkDao.clearAll()
+            knownNetworkRepository.clear()
             preferencesManager.clearAll()
-            _uiState.update { 
-                it.copy(csvPath = null, scanIntervalMinutes = PreferencesManager.DEFAULT_SCAN_INTERVAL, scanningEnabled = true) 
+            _uiState.update {
+                it.copy(
+                    csvPath = null,
+                    scanIntervalMinutes = PreferencesManager.DEFAULT_SCAN_INTERVAL,
+                    scanningEnabled = true,
+                    flagSecureEnabled = true
+                )
             }
             _loadResult.value = LoadResult.DataCleared
         }

@@ -1,10 +1,8 @@
 package com.wirefinder.util
 
-import android.content.Context
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
-import android.util.Base64
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
@@ -12,6 +10,7 @@ import java.io.FileOutputStream
 import java.nio.charset.StandardCharsets
 import java.security.KeyStore
 import java.security.SecureRandom
+import java.util.Base64
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
@@ -35,6 +34,8 @@ object EncryptionService {
     private const val MAGIC_LENGTH = 4
     private const val MAGIC_PASSWORD = "WFC1"
     private const val MAGIC_BIOMETRIC = "WFC2"
+    private const val BUFFER_SIZE = 64 * 1024
+    private val secureRandom = SecureRandom()
 
     enum class FileFormat { PLAINTEXT, PASSWORD_ENCRYPTED, BIOMETRIC_ENCRYPTED }
 
@@ -172,7 +173,7 @@ object EncryptionService {
         try {
             outputStream.write(MAGIC_BIOMETRIC.toByteArray(StandardCharsets.US_ASCII))
             outputStream.write(iv)
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(BUFFER_SIZE)
             var bytesRead: Int
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                 val encrypted = cipher.update(buffer, 0, bytesRead)
@@ -200,7 +201,7 @@ object EncryptionService {
                 throw IllegalArgumentException("Invalid encrypted file: missing IV")
             }
             val output = ByteArrayOutputStream()
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(BUFFER_SIZE)
             var bytesRead: Int
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                 val decrypted = cipher.update(buffer, 0, bytesRead)
@@ -241,7 +242,7 @@ object EncryptionService {
             outputStream.write(salt)
             outputStream.write(iv)
 
-            val buffer = ByteArray(8192)
+            val buffer = ByteArray(BUFFER_SIZE)
             var bytesRead: Int
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                 val encrypted = cipher.update(buffer, 0, bytesRead)
@@ -259,92 +260,47 @@ object EncryptionService {
         }
     }
 
-    /**
-     * Decrypts a file encrypted with encryptFile.
-     * Returns a FileInputStream for the decrypted content.
-     */
-    fun decryptFile(encryptedFile: File, password: String): FileInputStream {
+    fun decryptToString(encryptedFile: File, password: String): String {
         val inputStream = FileInputStream(encryptedFile)
-
-        // Verify magic header
-        val magic = ByteArray(MAGIC_LENGTH)
-        if (inputStream.read(magic) != MAGIC_LENGTH ||
-            !magic.contentEquals(MAGIC_PASSWORD.toByteArray(StandardCharsets.US_ASCII))
-        ) {
-            inputStream.close()
-            throw IllegalArgumentException("Invalid encrypted file: missing magic header")
-        }
-
-        // Read salt (16 bytes)
-        val salt = ByteArray(SALT_LENGTH)
-        if (inputStream.read(salt) != SALT_LENGTH) {
-            inputStream.close()
-            throw IllegalArgumentException("Invalid encrypted file: missing salt")
-        }
-
-        // Read IV (12 bytes)
-        val iv = ByteArray(GCM_IV_LENGTH)
-        if (inputStream.read(iv) != GCM_IV_LENGTH) {
-            inputStream.close()
-            throw IllegalArgumentException("Invalid encrypted file: missing IV")
-        }
-
-        val key = deriveKey(password, salt)
-
-        val cipher = Cipher.getInstance(ALGORITHM)
-        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(GCM_TAG_LENGTH * 8, iv))
-
-        // Create a temporary file for decrypted content
-        val tempFile = File(encryptedFile.parentFile, "${encryptedFile.name}.decrypted.tmp")
-        val outputStream = FileOutputStream(tempFile)
-
         try {
-            val buffer = ByteArray(8192)
+            val magic = ByteArray(MAGIC_LENGTH)
+            if (inputStream.read(magic) != MAGIC_LENGTH ||
+                !magic.contentEquals(MAGIC_PASSWORD.toByteArray(StandardCharsets.US_ASCII))
+            ) {
+                throw IllegalArgumentException("Invalid encrypted file: missing magic header")
+            }
+
+            val salt = ByteArray(SALT_LENGTH)
+            if (inputStream.read(salt) != SALT_LENGTH) {
+                throw IllegalArgumentException("Invalid encrypted file: missing salt")
+            }
+
+            val iv = ByteArray(GCM_IV_LENGTH)
+            if (inputStream.read(iv) != GCM_IV_LENGTH) {
+                throw IllegalArgumentException("Invalid encrypted file: missing IV")
+            }
+
+            val cipher = Cipher.getInstance(ALGORITHM)
+            cipher.init(
+                Cipher.DECRYPT_MODE,
+                deriveKey(password, salt),
+                GCMParameterSpec(GCM_TAG_LENGTH * 8, iv)
+            )
+
+            val output = ByteArrayOutputStream(encryptedFile.length().toInt().coerceAtLeast(BUFFER_SIZE))
+            val buffer = ByteArray(BUFFER_SIZE)
             var bytesRead: Int
             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                 val decrypted = cipher.update(buffer, 0, bytesRead)
-                if (decrypted != null) {
-                    outputStream.write(decrypted)
-                }
+                if (decrypted != null) output.write(decrypted)
             }
-
             val finalBytes = cipher.doFinal()
-            if (finalBytes.isNotEmpty()) {
-                outputStream.write(finalBytes)
-            }
+            if (finalBytes.isNotEmpty()) output.write(finalBytes)
+            return output.toString(StandardCharsets.UTF_8.name())
         } catch (e: Exception) {
-            outputStream.close()
-            tempFile.delete()
-            inputStream.close()
             throw SecurityException("Decryption failed: wrong password or corrupted file", e)
         } finally {
             inputStream.close()
-            outputStream.close()
-        }
-
-        // Schedule temp file for deletion on JVM exit (fallback if caller forgets)
-        tempFile.deleteOnExit()
-
-        // Returned stream deletes the plaintext temp file when closed
-        return object : FileInputStream(tempFile) {
-            override fun close() {
-                super.close()
-                tempFile.delete()
-            }
-        }
-    }
-
-    /**
-     * Decrypts file content to a string (for CSV parsing).
-     */
-    fun decryptToString(encryptedFile: File, password: String): String {
-        val inputStream = decryptFile(encryptedFile, password)
-        return try {
-            inputStream.readBytes().toString(StandardCharsets.UTF_8)
-        } finally {
-            inputStream.close()
-            // Clean up temp file
-            File(encryptedFile.parentFile, "${encryptedFile.name}.decrypted.tmp").delete()
         }
     }
 
@@ -373,19 +329,22 @@ object EncryptionService {
     private fun deriveKey(password: String, salt: ByteArray): SecretKey {
         val factory = SecretKeyFactory.getInstance(PBKDF2_ALGORITHM)
         val spec = PBEKeySpec(password.toCharArray(), salt, ITERATIONS, KEY_LENGTH)
-        val secret = factory.generateSecret(spec)
-        return SecretKeySpec(secret.encoded, KEY_ALGORITHM)
+        return try {
+            SecretKeySpec(factory.generateSecret(spec).encoded, KEY_ALGORITHM)
+        } finally {
+            spec.clearPassword()
+        }
     }
 
     private fun generateSalt(): ByteArray {
         val salt = ByteArray(SALT_LENGTH)
-        SecureRandom().nextBytes(salt)
+        secureRandom.nextBytes(salt)
         return salt
     }
 
     private fun generateIv(): ByteArray {
         val iv = ByteArray(GCM_IV_LENGTH)
-        SecureRandom().nextBytes(iv)
+        secureRandom.nextBytes(iv)
         return iv
     }
 
@@ -410,14 +369,14 @@ object EncryptionService {
         val combined = ByteArray(iv.size + encrypted.size)
         System.arraycopy(iv, 0, combined, 0, iv.size)
         System.arraycopy(encrypted, 0, combined, iv.size, encrypted.size)
-        return Base64.encodeToString(combined, Base64.NO_WRAP)
+        return Base64.getEncoder().encodeToString(combined)
     }
 
     /**
      * Decrypts a string with a key (for testing).
      */
     fun decryptString(encryptedBase64: String, key: SecretKey): String {
-        val combined = Base64.decode(encryptedBase64, Base64.NO_WRAP)
+        val combined = Base64.getDecoder().decode(encryptedBase64)
         val iv = ByteArray(GCM_IV_LENGTH)
         System.arraycopy(combined, 0, iv, 0, GCM_IV_LENGTH)
         val encrypted = ByteArray(combined.size - GCM_IV_LENGTH)

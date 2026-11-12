@@ -1,17 +1,9 @@
 package com.wirefinder.util
 
 import com.wirefinder.data.APNetwork
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
-/**
- * Matches detected Wi-Fi networks against known networks from CSV.
- * Uses case-insensitive SSID matching and BSSID (MAC) matching.
- * Implements debouncing to avoid notification spam.
- */
 class NetworkMatcher {
 
     enum class MatchType(val dbValue: Int) {
@@ -20,13 +12,25 @@ class NetworkMatcher {
         BOTH(3);
 
         companion object {
-            fun fromDb(value: Int): MatchType? = entries.firstOrNull { it.dbValue == value }
+            fun fromDb(value: Int): MatchType? = when (value) {
+                1 -> SSID_ONLY
+                2 -> MAC_ONLY
+                3 -> BOTH
+                else -> null
+            }
         }
     }
 
     data class MatchResult(val network: APNetwork, val type: MatchType)
 
-    private val knownNetworks = ConcurrentHashMap<String, APNetwork>()
+    private data class KnownMaps(
+        val byMac: Map<String, APNetwork>,
+        val bySsid: Map<String, APNetwork>
+    )
+
+    @Volatile
+    private var knownMaps: KnownMaps = KnownMaps(emptyMap(), emptyMap())
+
     private val lastNotificationTime = ConcurrentHashMap<String, Long>()
 
     companion object {
@@ -34,33 +38,27 @@ class NetworkMatcher {
         const val MIN_SIGNAL_STRENGTH_DBM = -85
     }
 
-    private val _knownNetworksFlow = MutableStateFlow<List<APNetwork>>(emptyList())
-    val knownNetworksFlow: StateFlow<List<APNetwork>> = _knownNetworksFlow.asStateFlow()
-
-    /**
-     * Updates the set of known networks from CSV.
-     */
     fun updateKnownNetworks(networks: List<APNetwork>) {
-        knownNetworks.clear()
+        val byMac = HashMap<String, APNetwork>(networks.size)
+        val bySsid = HashMap<String, APNetwork>(networks.size)
         for (network in networks) {
-            knownNetworks[network.normalizedMac] = network
-            // Also index by SSID for case-insensitive matching
-            knownNetworks["SSID:${network.normalizedSsid}"] = network
+            byMac[network.normalizedMac] = network
+            bySsid[network.normalizedSsid] = network
         }
-        _knownNetworksFlow.value = networks
+        knownMaps = KnownMaps(byMac, bySsid)
+
+        val now = System.currentTimeMillis()
+        lastNotificationTime.entries.removeIf {
+            now - it.value >= NOTIFICATION_DEBOUNCE_MS
+        }
     }
 
-    /**
-     * Checks if a detected network matches any known network.
-     * Matches by BSSID (MAC) first; falls back to case-insensitive SSID matching
-     * (spoofable by a rogue AP with the same name).
-     * When requireBssid is true (background alerts), only exact BSSID matches
-     * trigger, so a rogue AP with the same SSID cannot cause a false alert.
-     * The returned MatchResult carries how the match was made: SSID_ONLY,
-     * MAC_ONLY (BSSID matched but SSID differed), or BOTH.
-     */
-    fun matchNetwork(detectedBssid: String, detectedSsid: String, signalStrength: Int, requireBssid: Boolean = false): MatchResult? {
-        // Skip weak signals
+    fun matchNetwork(
+        detectedBssid: String,
+        detectedSsid: String,
+        signalStrength: Int,
+        requireBssid: Boolean = false
+    ): MatchResult? {
         if (signalStrength < MIN_SIGNAL_STRENGTH_DBM) {
             return null
         }
@@ -68,9 +66,9 @@ class NetworkMatcher {
         val normalizedBssid = APNetwork.normalizeMac(detectedBssid)
         val normalizedSsid = APNetwork.normalizeSsid(detectedSsid)
 
-        // First try exact BSSID match (if a usable MAC was reported)
+        val maps = knownMaps
         if (isUsableBssid(normalizedBssid)) {
-            val bssidMatch = knownNetworks[normalizedBssid]
+            val bssidMatch = maps.byMac[normalizedBssid]
             if (bssidMatch != null) {
                 val type = if (bssidMatch.normalizedSsid == normalizedSsid) {
                     MatchType.BOTH
@@ -83,14 +81,10 @@ class NetworkMatcher {
             }
         }
 
-        // Fall back to case-insensitive SSID match (if an SSID was reported,
-        // e.g. hidden networks report an empty SSID) — only when a BSSID
-        // match is not required
         if (!requireBssid && normalizedSsid.isNotEmpty()) {
-            val ssidKey = "SSID:$normalizedSsid"
-            val ssidMatch = knownNetworks[ssidKey]
+            val ssidMatch = maps.bySsid[normalizedSsid]
             if (ssidMatch != null) {
-                return checkDebounceAndReturn(ssidMatch, ssidKey)?.let {
+                return checkDebounceAndReturn(ssidMatch, normalizedSsid)?.let {
                     MatchResult(it, MatchType.SSID_ONLY)
                 }
             }
@@ -99,11 +93,6 @@ class NetworkMatcher {
         return null
     }
 
-    /**
-     * A BSSID is usable for matching when it was actually reported.
-     * Android may report an empty string, or a "00:00:00:00:00:00" placeholder
-     * when location-derived data is unavailable.
-     */
     private fun isUsableBssid(bssid: String): Boolean {
         if (bssid.isEmpty()) return false
         if (bssid == "00:00:00:00:00:00") return false
@@ -121,23 +110,14 @@ class NetworkMatcher {
         return null
     }
 
-    /**
-     * Clears the debounce timer for a network (useful for testing).
-     */
     fun clearDebounce(key: String) {
         lastNotificationTime.remove(key)
     }
 
-    /**
-     * Clears all debounce timers.
-     */
     fun clearAllDebounce() {
         lastNotificationTime.clear()
     }
 
-    /**
-     * Gets the count of known networks.
-     */
     val knownNetworkCount: Int
-        get() = knownNetworks.size / 2 // Each network stored twice (by MAC and by SSID)
+        get() = knownMaps.byMac.size
 }

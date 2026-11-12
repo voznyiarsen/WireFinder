@@ -21,6 +21,15 @@ class NotificationService @Inject constructor(
 ) {
     private val CHANNEL_ID = "network_alerts"
     private val NOTIFICATION_ID_BASE = 1000
+    private val notificationManager = NotificationManagerCompat.from(context)
+
+    private val publicVersion: Notification by lazy {
+        NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_notification_wifi)
+            .setContentTitle(context.getString(R.string.notification_public_title))
+            .setContentText(context.getString(R.string.notification_public_text))
+            .build()
+    }
 
     init {
         createNotificationChannel()
@@ -88,13 +97,7 @@ class NotificationService @Inject constructor(
             .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .setPublicVersion(
-                NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(R.drawable.ic_notification_wifi)
-                    .setContentTitle(context.getString(R.string.notification_public_title))
-                    .setContentText(context.getString(R.string.notification_public_text))
-                    .build()
-            )
+            .setPublicVersion(publicVersion)
             .setContentIntent(pendingIntent)
             .addAction(
                 R.drawable.ic_notification_wifi,
@@ -108,10 +111,10 @@ class NotificationService @Inject constructor(
             )
             .build()
 
-        NotificationManagerCompat.from(context).notify(
-            notificationId,
-            notification
-        )
+        try {
+            notificationManager.notify(notificationId, notification)
+        } catch (_: SecurityException) {
+        }
     }
 
     /**
@@ -130,13 +133,13 @@ class NotificationService @Inject constructor(
      * Cancels a specific notification.
      */
     fun cancelNotification(networkMac: String) {
-        NotificationManagerCompat.from(context).cancel(stableNotificationId(networkMac))
+        notificationManager.cancel(stableNotificationId(networkMac))
     }
 
     /**
      * Cancels all notifications from this app.
      */
     fun cancelAllNotifications() {
-        NotificationManagerCompat.from(context).cancelAll()
+        notificationManager.cancelAll()
     }
 }

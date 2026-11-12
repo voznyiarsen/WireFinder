@@ -6,6 +6,7 @@ import android.view.ViewGroup
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
+import com.wirefinder.R
 import com.wirefinder.data.APNetwork
 import com.wirefinder.databinding.ItemNetworkBinding
 import com.wirefinder.util.NetworkMatcher
@@ -18,6 +19,18 @@ class NetworkAdapter : ListAdapter<APNetwork, NetworkAdapter.NetworkViewHolder>(
     var onNetworkClick: ((APNetwork) -> Unit)? = null
     var onShareClick: ((APNetwork) -> Unit)? = null
 
+    private val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
+
+    init {
+        setHasStableIds(true)
+    }
+
+    override fun getItemId(position: Int): Long {
+        val mac = getItem(position).mac
+        return mac.filter { it != ':' }.toLongOrNull(16)
+            ?: mac.hashCode().toLong()
+    }
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): NetworkViewHolder {
         val binding = ItemNetworkBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return NetworkViewHolder(binding)
@@ -27,27 +40,49 @@ class NetworkAdapter : ListAdapter<APNetwork, NetworkAdapter.NetworkViewHolder>(
         holder.bind(getItem(position))
     }
 
-    inner class NetworkViewHolder(private val binding: ItemNetworkBinding) : RecyclerView.ViewHolder(binding.root) {
+    inner class NetworkViewHolder(private val binding: ItemNetworkBinding) :
+        RecyclerView.ViewHolder(binding.root) {
+
+        private val context = binding.root.context
+        private val onlineGreen = context.getColor(R.color.online_green)
+        private val warningOrange = context.getColor(R.color.warning_orange)
+        private val offlineGray = context.getColor(R.color.offline_gray)
+        private val ssidBadgeDesc = context.getString(R.string.match_badge_ssid_desc)
+        private val bothBadgeDesc = context.getString(R.string.match_badge_both_desc)
+        private val macBadgeDesc = context.getString(R.string.match_badge_mac_desc)
+
+        init {
+            binding.ivStatus.setImageResource(R.drawable.ic_wifi_connected)
+            binding.root.setOnClickListener {
+                val position = absoluteAdapterPosition
+                if (position != RecyclerView.NO_POSITION) {
+                    onNetworkClick?.invoke(getItem(position))
+                }
+            }
+            binding.btnShare.setOnClickListener {
+                val position = absoluteAdapterPosition
+                if (position != RecyclerView.NO_POSITION) {
+                    onShareClick?.invoke(getItem(position))
+                }
+            }
+        }
+
         fun bind(network: APNetwork) {
             binding.apply {
                 tvSsid.text = network.ssid
                 tvMac.text = network.mac
-
-                val dateFormat = SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault())
-                tvLastSeen.text = itemView.context.getString(
-                    com.wirefinder.R.string.network_last_seen,
+                tvLastSeen.text = context.getString(
+                    R.string.network_last_seen,
                     dateFormat.format(Date(network.lastSeen))
                 )
                 tvSignal.text = "${network.lastSignalStrength} dBm"
                 tvSignal.setTextColor(
-                    if (network.lastSignalStrength > -60)
-                        itemView.context.getColor(com.wirefinder.R.color.online_green)
-                    else if (network.lastSignalStrength > -75)
-                        itemView.context.getColor(com.wirefinder.R.color.warning_orange)
-                    else
-                        itemView.context.getColor(com.wirefinder.R.color.offline_gray)
+                    when {
+                        network.lastSignalStrength > -60 -> onlineGreen
+                        network.lastSignalStrength > -75 -> warningOrange
+                        else -> offlineGray
+                    }
                 )
-                ivStatus.setImageResource(com.wirefinder.R.drawable.ic_wifi_connected)
 
                 val matchType = NetworkMatcher.MatchType.fromDb(network.lastMatchType)
                 llMatchBadges.visibility = if (matchType == null) View.GONE else View.VISIBLE
@@ -58,22 +93,11 @@ class NetworkAdapter : ListAdapter<APNetwork, NetworkAdapter.NetworkViewHolder>(
                 tvBadgeSsid.visibility = if (ssidMatched) View.VISIBLE else View.GONE
                 tvBadgeMac.visibility = if (macMatched) View.VISIBLE else View.GONE
                 tvBadgeSsid.setTextColor(
-                    if (matchType == NetworkMatcher.MatchType.BOTH) {
-                        itemView.context.getColor(com.wirefinder.R.color.online_green)
-                    } else {
-                        itemView.context.getColor(com.wirefinder.R.color.warning_orange)
-                    }
+                    if (matchType == NetworkMatcher.MatchType.BOTH) onlineGreen else warningOrange
                 )
-                tvBadgeSsid.contentDescription = if (matchType == NetworkMatcher.MatchType.BOTH) {
-                    itemView.context.getString(com.wirefinder.R.string.match_badge_both_desc)
-                } else {
-                    itemView.context.getString(com.wirefinder.R.string.match_badge_ssid_desc)
-                }
-                tvBadgeMac.contentDescription =
-                    itemView.context.getString(com.wirefinder.R.string.match_badge_mac_desc)
-
-                binding.root.setOnClickListener { onNetworkClick?.invoke(network) }
-                btnShare.setOnClickListener { onShareClick?.invoke(network) }
+                tvBadgeSsid.contentDescription =
+                    if (matchType == NetworkMatcher.MatchType.BOTH) bothBadgeDesc else ssidBadgeDesc
+                tvBadgeMac.contentDescription = macBadgeDesc
             }
         }
     }

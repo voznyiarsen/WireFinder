@@ -5,10 +5,12 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.FileInputStream
 import java.io.InputStreamReader
+import java.io.StringReader
 import java.nio.charset.StandardCharsets
-import java.util.zip.GZIPInputStream
 
 object CsvParser {
+
+    private const val MAX_ERRORS = 100
 
     data class ParseResult(
         val networks: List<APNetwork>,
@@ -16,96 +18,97 @@ object CsvParser {
         val linesParsed: Int
     )
 
-    /**
-     * Parses a CSV file with format: MAC,SSID,PASSWORD
-     * - Case-insensitive SSID matching
-     * - Handles quoted fields
-     * - Skips empty lines and comments (starting with #)
-     * - Normalizes MAC addresses to lowercase with colons
-     */
     fun parseCsv(file: File, password: String? = null): ParseResult {
-        val networks = mutableListOf<APNetwork>()
-        val errors = mutableListOf<String>()
+        return try {
+            val reader = if (!password.isNullOrEmpty()) {
+                BufferedReader(StringReader(EncryptionService.decryptToString(file, password)))
+            } else {
+                BufferedReader(InputStreamReader(FileInputStream(file), StandardCharsets.UTF_8))
+            }
+            reader.use { parse(it) }
+        } catch (e: SecurityException) {
+            ParseResult(emptyList(), listOf("Decryption failed: ${e.message}"), 0)
+        } catch (e: Exception) {
+            ParseResult(emptyList(), listOf("Failed to read CSV: ${e.message}"), 0)
+        }
+    }
+
+    fun parseCsvContent(content: String): ParseResult {
+        return BufferedReader(StringReader(content)).use { parse(it) }
+    }
+
+    private fun parse(reader: BufferedReader): ParseResult {
+        val networks = LinkedHashMap<String, APNetwork>()
+        val errors = ArrayList<String>()
         var linesParsed = 0
+        var lineNumber = 0
 
-        val inputStream = if (password != null && password.isNotEmpty()) {
-            // File is encrypted, decrypt first
-            try {
-                EncryptionService.decryptFile(file, password)
-            } catch (e: Exception) {
-                return ParseResult(emptyList(), listOf("Decryption failed: ${e.message}"), 0)
+        while (true) {
+            val line = reader.readLine() ?: break
+            lineNumber++
+            val trimmed = line.trim()
+
+            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                continue
             }
-        } else {
-            FileInputStream(file)
+
+            linesParsed++
+            val fields = parseCsvLine(trimmed)
+            if (fields.size < 3) {
+                addError(
+                    errors,
+                    "Line $lineNumber: Expected 3 fields (MAC,SSID,PASSWORD), got ${fields.size}"
+                )
+                continue
+            }
+
+            val mac = fields[0].trim()
+            val ssid = fields[1].trim()
+            val password = fields[2].trim()
+
+            if (!isValidMac(mac)) {
+                addError(errors, "Line $lineNumber: Invalid MAC address '$mac'")
+                continue
+            }
+
+            if (ssid.isEmpty()) {
+                addError(errors, "Line $lineNumber: Empty SSID")
+                continue
+            }
+
+            val normalizedMac = APNetwork.normalizeMac(mac)
+            networks[normalizedMac] = APNetwork(
+                mac = normalizedMac,
+                ssid = ssid,
+                password = password
+            )
         }
 
-        val reader = BufferedReader(InputStreamReader(inputStream, StandardCharsets.UTF_8))
+        return ParseResult(networks.values.toList(), errors, linesParsed)
+    }
 
-        try {
-            var line: String?
-            var lineNumber = 0
-            while (reader.readLine().also { line = it } != null) {
-                lineNumber++
-                val trimmed = line!!.trim()
-                
-                // Skip empty lines and comments
-                if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-                    continue
-                }
-
-                linesParsed++
-                
-                // Parse CSV line (handle quoted fields)
-                val fields = parseCsvLine(trimmed)
-                if (fields.size < 3) {
-                    errors.add("Line $lineNumber: Expected 3 fields (MAC,SSID,PASSWORD), got ${fields.size}")
-                    continue
-                }
-
-                val mac = fields[0].trim()
-                val ssid = fields[1].trim()
-                val passwordField = fields[2].trim()
-
-                // Validate MAC address format
-                if (!isValidMac(mac)) {
-                    errors.add("Line $lineNumber: Invalid MAC address '$mac'")
-                    continue
-                }
-
-                if (ssid.isEmpty()) {
-                    errors.add("Line $lineNumber: Empty SSID")
-                    continue
-                }
-
-                val normalizedMac = APNetwork.normalizeMac(mac)
-                val normalizedSsid = APNetwork.normalizeSsid(ssid)
-
-                networks.add(APNetwork(
-                    mac = normalizedMac,
-                    ssid = normalizedSsid,
-                    password = passwordField
-                ))
-            }
-        } finally {
-            reader.close()
+    private fun addError(errors: MutableList<String>, message: String) {
+        if (errors.size < MAX_ERRORS) {
+            errors.add(message)
         }
-
-        return ParseResult(networks, errors, linesParsed)
     }
 
     private fun parseCsvLine(line: String): List<String> {
-        val fields = mutableListOf<String>()
-        val sb = StringBuilder()
+        val fields = ArrayList<String>(3)
+        val field = StringBuilder(line.length)
         var inQuotes = false
         var i = 0
-        
+
         while (i < line.length) {
             val c = line[i]
             when {
                 c == '"' -> {
                     if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
-                        // Escaped quote
-                        sb.append('"')
+                        if (i + 2 >= line.length || line[i + 2] == ',') {
+                            inQuotes = false
+                        } else {
+                            field.append('"')
+                        }
                         i += 2
                     } else {
                         inQuotes = !inQuotes
@@ -113,73 +116,29 @@ object CsvParser {
                     }
                 }
                 c == ',' && !inQuotes -> {
-                    fields.add(sb.toString())
-                    sb.setLength(0)
+                    fields.add(field.toString())
+                    field.setLength(0)
                     i++
                 }
                 else -> {
-                    sb.append(c)
+                    field.append(c)
                     i++
                 }
             }
         }
-        fields.add(sb.toString())
+        fields.add(field.toString())
         return fields
     }
 
     private fun isValidMac(mac: String): Boolean {
-        // Accept formats: AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF or AABBCCDDEEFF
-        val colonPattern = "^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$".toRegex()
-        val dashPattern = "^([0-9A-Fa-f]{2}-){5}[0-9A-Fa-f]{2}$".toRegex()
-        val noSepPattern = "^[0-9A-Fa-f]{12}$".toRegex()
-        return mac.matches(colonPattern) || mac.matches(dashPattern) || mac.matches(noSepPattern)
-    }
-
-    fun parseCsvContent(content: String): ParseResult {
-        val networks = mutableListOf<APNetwork>()
-        val errors = mutableListOf<String>()
-        var linesParsed = 0
-
-        content.lines().forEachIndexed { index, line ->
-            val lineNumber = index + 1
-            val trimmed = line.trim()
-            
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) {
-                return@forEachIndexed
+        var hexDigits = 0
+        for (c in mac) {
+            when {
+                c == ':' || c == '-' -> Unit
+                c.isDigit() || c.lowercaseChar() in 'a'..'f' -> hexDigits++
+                else -> return false
             }
-
-            linesParsed++
-            val fields = parseCsvLine(trimmed)
-            
-            if (fields.size < 3) {
-                errors.add("Line $lineNumber: Expected 3 fields (MAC,SSID,PASSWORD), got ${fields.size}")
-                return@forEachIndexed
-            }
-
-            val mac = fields[0].trim()
-            val ssid = fields[1].trim()
-            val passwordField = fields[2].trim()
-
-            if (!isValidMac(mac)) {
-                errors.add("Line $lineNumber: Invalid MAC address '$mac'")
-                return@forEachIndexed
-            }
-
-            if (ssid.isEmpty()) {
-                errors.add("Line $lineNumber: Empty SSID")
-                return@forEachIndexed
-            }
-
-            val normalizedMac = APNetwork.normalizeMac(mac)
-            val normalizedSsid = APNetwork.normalizeSsid(ssid)
-
-            networks.add(APNetwork(
-                mac = normalizedMac,
-                ssid = normalizedSsid,
-                password = passwordField
-            ))
         }
-
-        return ParseResult(networks, errors, linesParsed)
+        return hexDigits == 12
     }
 }

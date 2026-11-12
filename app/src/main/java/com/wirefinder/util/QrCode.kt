@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
+import com.google.zxing.common.BitArray
 import com.google.zxing.qrcode.QRCodeWriter
 
 object QrCode {
@@ -17,9 +18,10 @@ object QrCode {
             mapOf(EncodeHintType.MARGIN to 1)
         )
         val pixels = IntArray(sizePx * sizePx)
+        val row = BitArray(sizePx)
         var i = 0
         for (y in 0 until sizePx) {
-            val row = matrix.getRow(y, null)
+            matrix.getRow(y, row)
             for (x in 0 until sizePx) {
                 pixels[i++] = if (row[x]) Color.BLACK else Color.WHITE
             }

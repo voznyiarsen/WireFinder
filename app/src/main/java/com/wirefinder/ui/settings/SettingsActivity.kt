@@ -1,6 +1,5 @@
 package com.wirefinder.ui.settings
 
-import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -10,18 +9,17 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.widget.doOnTextChanged
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wirefinder.R
 import com.wirefinder.databinding.ActivitySettingsBinding
-import com.wirefinder.util.CsvParser
-import com.wirefinder.util.EncryptionService
 import com.wirefinder.util.ErrorDialog
 import com.wirefinder.util.PreferencesManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.launch
 import java.io.File
-import java.io.FileOutputStream
 
 @AndroidEntryPoint
 class SettingsActivity : AppCompatActivity() {
@@ -48,20 +46,22 @@ class SettingsActivity : AppCompatActivity() {
 
     private fun setupObservers() {
         lifecycleScope.launch {
-            viewModel.uiState.collect { state ->
-                updateUI(state)
-            }
-        }
-
-        lifecycleScope.launch {
-            viewModel.loadResult.collect { result ->
-                result?.let { handleLoadResult(it) }
-            }
-        }
-
-        lifecycleScope.launch {
-            viewModel.encryptPending.collect { pending ->
-                if (pending) promptEncryptCsv()
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.uiState.collect { state ->
+                        updateUI(state)
+                    }
+                }
+                launch {
+                    viewModel.loadResult.collect { result ->
+                        result?.let { handleLoadResult(it) }
+                    }
+                }
+                launch {
+                    viewModel.encryptPending.collect { pending ->
+                        if (pending) promptEncryptCsv()
+                    }
+                }
             }
         }
     }
@@ -77,14 +77,18 @@ class SettingsActivity : AppCompatActivity() {
                 tvCurrentCsv.visibility = android.view.View.VISIBLE
             }
 
-            // Scan interval
-            etScanInterval.setText(state.scanIntervalMinutes.toString())
-            swEnableScanning.isChecked = state.scanningEnabled
+            val intervalText = state.scanIntervalMinutes.toString()
+            if (!etScanInterval.hasFocus() && etScanInterval.text.toString() != intervalText) {
+                etScanInterval.setText(intervalText)
+            }
+            if (swEnableScanning.isChecked != state.scanningEnabled) {
+                swEnableScanning.isChecked = state.scanningEnabled
+            }
 
-            // Privacy
-            swFlagSecure.isChecked = state.flagSecureEnabled
+            if (swFlagSecure.isChecked != state.flagSecureEnabled) {
+                swFlagSecure.isChecked = state.flagSecureEnabled
+            }
 
-            // Loading state
             progressBar.visibility = if (state.isLoading) View.VISIBLE else View.GONE
         }
     }
@@ -124,6 +128,7 @@ class SettingsActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.toast_csv_cleared, Toast.LENGTH_SHORT).show()
             }
         }
+        viewModel.dismissLoadResult()
     }
 
     private fun promptDecryptCsv() {
@@ -211,6 +216,19 @@ class SettingsActivity : AppCompatActivity() {
 
         binding.etScanInterval.doOnTextChanged { text, _, _, _ ->
             text.toString().toIntOrNull()?.let { viewModel.setScanInterval(it) }
+        }
+
+        binding.etScanInterval.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) {
+                val value = binding.etScanInterval.text.toString().toIntOrNull()
+                    ?.coerceIn(
+                        PreferencesManager.MIN_SCAN_INTERVAL,
+                        PreferencesManager.MAX_SCAN_INTERVAL
+                    )
+                    ?: PreferencesManager.DEFAULT_SCAN_INTERVAL
+                binding.etScanInterval.setText(value.toString())
+                viewModel.setScanInterval(value)
+            }
         }
 
         binding.swEnableScanning.setOnCheckedChangeListener { _, isChecked ->

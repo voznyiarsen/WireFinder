@@ -16,7 +16,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.wirefinder.R
 import com.wirefinder.databinding.ActivityMainBinding
@@ -88,6 +90,7 @@ class MainActivity : AppCompatActivity() {
         supportActionBar?.setDisplayShowTitleEnabled(false)
 
         binding.recyclerView.layoutManager = androidx.recyclerview.widget.LinearLayoutManager(this)
+        binding.recyclerView.setHasFixedSize(true)
         val adapter = NetworkAdapter()
         adapter.onNetworkClick = { network -> viewModel.connectToNetwork(network) }
         adapter.onShareClick = { network -> showQrDialog(network) }
@@ -153,26 +156,27 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupObservers() {
         lifecycleScope.launch {
-            viewModel.uiState.collect { state ->
-                updateUI(state)
-            }
-        }
-
-        lifecycleScope.launch {
-            viewModel.csvLoadResult.collect { result ->
-                result?.let { handleLoadResult(it) }
-            }
-        }
-
-        lifecycleScope.launch {
-            viewModel.manualScanResult.collect { result ->
-                result?.let { handleScanResult(it) }
-            }
-        }
-
-        lifecycleScope.launch {
-            viewModel.connectResult.collect { result ->
-                result?.let { handleConnectResult(it) }
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                launch {
+                    viewModel.uiState.collect { state ->
+                        updateUI(state)
+                    }
+                }
+                launch {
+                    viewModel.csvLoadResult.collect { result ->
+                        result?.let { handleLoadResult(it) }
+                    }
+                }
+                launch {
+                    viewModel.manualScanResult.collect { result ->
+                        result?.let { handleScanResult(it) }
+                    }
+                }
+                launch {
+                    viewModel.connectResult.collect { result ->
+                        result?.let { handleConnectResult(it) }
+                    }
+                }
             }
         }
     }
@@ -281,10 +285,10 @@ class MainActivity : AppCompatActivity() {
             getString(R.string.qr_password_label, network.password)
         }
 
-        lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
+        val qrJob = lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) {
             val bitmap = com.wirefinder.util.QrCode.generate(wifiString)
-            lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Main) {
-                qrImage.setImageBitmap(bitmap)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                if (qrImage.isAttachedToWindow) qrImage.setImageBitmap(bitmap)
             }
         }
 
@@ -306,6 +310,7 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent.createChooser(shareIntent, getString(R.string.btn_share_network)))
             }
             .show()
+        dialog.setOnDismissListener { qrJob.cancel() }
         lifecycleScope.launch {
             if (viewModel.isFlagSecureEnabled()) {
                 dialog.window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
@@ -395,6 +400,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+        viewModel.dismissCsvLoadResult()
     }
 
     private fun promptDecryptCsv() {

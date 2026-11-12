@@ -9,6 +9,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -35,6 +36,23 @@ class PreferencesManager @Inject constructor(
         const val DEFAULT_SCAN_INTERVAL = 15 // minutes
         const val MIN_SCAN_INTERVAL = 5
         const val MAX_SCAN_INTERVAL = 120
+    }
+
+    data class Snapshot(
+        val csvPath: String?,
+        val scanIntervalMinutes: Int,
+        val scanningEnabled: Boolean,
+        val flagSecure: Boolean
+    )
+
+    suspend fun snapshot(): Snapshot {
+        val prefs = dataStore.data.first()
+        return Snapshot(
+            csvPath = prefs[KEY_CSV_PATH],
+            scanIntervalMinutes = prefs[KEY_SCAN_INTERVAL_MINUTES] ?: DEFAULT_SCAN_INTERVAL,
+            scanningEnabled = prefs[KEY_SCANNING_ENABLED] ?: true,
+            flagSecure = prefs[KEY_FLAG_SECURE] ?: true
+        )
     }
 
     // CSV Path
