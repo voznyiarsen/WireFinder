@@ -25,23 +25,33 @@ object KeePassImporter {
                     for (entry in group.entries) {
                         count++
                         val ssid = entry.title?.trim().orEmpty()
-                        val bssid = entry.username?.trim().orEmpty()
+                        val bssidField = entry.username?.trim().orEmpty()
                         val pwd = entry.password.orEmpty()
                         if (ssid.isEmpty()) {
                             errors.add("Entry $count: empty title/SSID")
                             continue
                         }
-                        if (!CsvParser.isValidMac(bssid)) {
-                            errors.add("Entry $count: invalid BSSID '$bssid'")
+                        val macs = bssidField.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                        if (macs.isEmpty()) {
+                            errors.add("Entry $count: missing BSSID/MAC")
                             continue
                         }
-                        networks.add(
-                            APNetwork(
-                                mac = APNetwork.normalizeMac(bssid),
-                                ssid = ssid,
-                                password = pwd
+                        var added = false
+                        for (mac in macs) {
+                            if (!CsvParser.isValidMac(mac)) {
+                                errors.add("Entry $count: invalid BSSID '$mac'")
+                                continue
+                            }
+                            networks.add(
+                                APNetwork(
+                                    mac = APNetwork.normalizeMac(mac),
+                                    ssid = ssid,
+                                    password = pwd
+                                )
                             )
-                        )
+                            added = true
+                        }
+                        if (!added) continue
                     }
                     for (child in group.groups) {
                         walk(child)

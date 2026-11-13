@@ -97,6 +97,8 @@ dependencies {
 
     // KeePass KDBX import
     implementation("org.linguafranca.pwdb:KeePassJava2:3.1.0")
+    // StAX API (javax.xml.stream) for Jackson/Woodstox on Android
+    implementation("javax.xml.stream:stax-api:1.0-2")
 
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")
